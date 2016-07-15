@@ -17,6 +17,7 @@ AM_CPPFLAGS = \
 	-DCONFIG_DIR='"${config_dir}"'		\
 	-DSTORAGE_DIR='"${storage_dir}"'	\
 	-DRUN_DIR='"${run_dir}"'		\
+	-DURCU_INLINE_SMALL_FUNCTIONS		\
 	-I$(srcdir)/dnssec/lib
 
 ######################
