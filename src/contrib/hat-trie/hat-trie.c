@@ -1,3 +1,8 @@
+#ifdef TRIE_USE_QP
+    #include "contrib/qp-trie/qp.c"
+    #include "contrib/qp-trie/api-hat.c"
+#else
+
 /*
  * This file is part of hat-trie.
  *
@@ -1112,3 +1117,6 @@ value_t* hattrie_iter_val(hattrie_iter_t* i)
 
     return hhash_iter_val(i->i);
 }
+
+#endif
+
