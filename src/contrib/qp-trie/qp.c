@@ -112,7 +112,7 @@ typedef struct Tbranch {
 	uint64_t
 		flags : 2,
 		index : 45,
-		bitmap : 17; // FIXME: fully support valid prefixes as keys
+		bitmap : 17; // the first bit is for end-of-string child
 	union Trie *twigs;
 	/* TODO: other than x86_64 ABI might be broken.
 	 * > The order of bit fields within an allocation unit is undefined by standard!
@@ -140,34 +140,20 @@ static bool isbranch(const Trie *t) {
 	return t->branch.flags != 0;
 }
 
-// Make a bitmask for testing a branch bitmap.
-//
-// mask:
-// 1 -> 0xffff -> 0xfff0 -> 0xf0
-// 2 -> 0x0000 -> 0x000f -> 0x0f
-//
-// shift:
-// 1 -> 1 -> 4
-// 2 -> 0 -> 0
+/*! \brief Make a bitmask for testing a branch bitmap. */
 static Tbitmap nibbit(byte k, uint flags) {
-	uint mask = ((flags - 2) ^ 0x0f) & 0xff;
 	uint shift = (2 - flags) << 2;
-	return 1 << ((k & mask) >> shift);
+	uint nibble = (k >> shift) & 0xf;
+	return 1 << (nibble + 1/*because of prefix keys*/);
 }
 
-// Extract a nibble from a key and turn it into a bitmask.
+/*~ \brief Extract a nibble from a key and turn it into a bitmask. */
 static Tbitmap twigbit(Trie *t, const char *key, uint len) {
 	assert(isbranch(t));
 	uint i = t->branch.index;
 
-	/*
-	if (i == len && t->branch.flags == 1)
-		return 1<<16; // one nibble past the length of the key: leaf position
 	if (i >= len)
-		return 1; // take the first child
-	*/
-	if (i >= len)
-		return 1<<16; // leaf position
+		return 1 << 0; // leaf position
 
 	return nibbit((byte)key[i], t->branch.flags);
 }
@@ -525,7 +511,7 @@ static int Tns_find_branch(TnodeStack *ns, const char *key, size_t len
 		//b1 = nibbit(k1, f);
 	} else { // mlen == len: searched key is a prefix of some stored key(s)
 		f = 1;
-		//b1 = 1<<16;
+		//b1 = 1<<0;
 		if (pkcmp)
 			*pkcmp = (-256) - lkey->chars[mlen];
 		return 0;
@@ -549,7 +535,7 @@ static int Tns_last_leaf(TnodeStack *ns) {
 		Trie *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
-		int lasti = popcount(t->branch.bitmap & ((1<<16) - 1)) - 1; // ignore bit 16
+		int lasti = popcount(t->branch.bitmap) - 1;
 		assert(lasti >= 0);
 		ns->stack[ns->len++] = twig(t, lasti);
 	} while (true);
@@ -564,26 +550,20 @@ static int Tns_first_leaf(TnodeStack *ns) {
 		Trie *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
-		if (hastwig(t, 1<<16)) { // the prefix child is counted as first
-			t = twig(t, twigoff(t, 1<<16));
-			assert(!isbranch(t));
-			ns->stack[ns->len++] = t;
-			return 0;
-		}
 		ns->stack[ns->len++] = twig(t, 0);
 	} while (true);
 }
 
 /*! \brief Advance the node stack to the leaf that is previous to the current node.
  *
- * Note: prefix leaf under the current node DOES count (if present).
+ * Note: prefix leaf under the current node DOES count (if present; perhaps questionable).
  * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM. */
 static int Tns_prev_leaf(TnodeStack *ns) {
 	assert(ns && ns->len > 0);
 
 	Trie *t = ns->stack[ns->len-1];
-	if (hastwig(t, 1<<16)) {
-		t = twig(t, twigoff(t, 1<<16));
+	if (hastwig(t, 1<<0)) { // the prefix leaf
+		t = twig(t, 0);
 		ERR_RETURN(Tns_longer(ns));
 		ns->stack[ns->len++] = t;
 		return 0;
@@ -599,10 +579,6 @@ static int Tns_prev_leaf(TnodeStack *ns) {
 		if (pindex > 0) { // t isn't the first child -> go down the previous one
 			ns->stack[ns->len-1] = twig(p, pindex-1);
 			return Tns_last_leaf(ns);
-		}
-		if (hastwig(p, 1<<16)) { // parent has a "first-er" child
-			ns->stack[ns->len-1] = twig(p, twigoff(t, 1<<16));
-			return 0;
 		}
 		// we've got to go up again
 		--ns->len;
@@ -627,12 +603,7 @@ static int Tns_next_leaf(TnodeStack *ns) {
 		int pindex = t - p->branch.twigs; // index in parent via pointer arithmetic
 		assert(pindex >= 0 && pindex <= 16);
 		int pcount = popcount(p->branch.bitmap);
-		if (pindex == pcount-1 && hastwig(p, 1<<16)) { // t is the special prefix child
-			assert(!isbranch(t));
-			ns->stack[ns->len-1] = twig(p, 0);
-			return Tns_first_leaf(ns);
-		}
-		if (pindex+1 < pcount - hastwig(p, 1<<16)) { // t isn't the last child -> go down the next one
+		if (pindex+1 < pcount) { // t isn't the last child -> go down the next one
 			ns->stack[ns->len-1] = twig(p, pindex+1);
 			return Tns_first_leaf(ns);
 		}
@@ -738,7 +709,7 @@ value_t* Tget_ins(struct Tbl *tbl, const char *key, size_t len) {
 		b1 = nibbit(k1, f);
 	} else { // mlen == len: inserted key is a prefix of some stored key(s)
 		f = 1;
-		b1 = 1<<16;
+		b1 = 1<<0;
 	}
 	// Prepare the new leaf.
 	Tkey *t1key = mm_alloc(&tbl->mm, sizeof(Tkey)+len);
@@ -796,10 +767,6 @@ static int TapplyTrie(Trie *t, int (*f)(value_t*,void*), void* d) {
 	if (!isbranch(t))
 		return f(&t->leaf.val, d);
 	int child_count = popcount(t->branch.bitmap);
-	if (hastwig(t, 1<<16)) { // prefix child has to go first
-		ERR_RETURN(TapplyTrie(twig(t, child_count-1), f, d));
-		--child_count;
-	}
 	for (int i = 0; i < child_count; ++i)
 		ERR_RETURN(TapplyTrie(twig(t, i), f, d));
 	return 0;
