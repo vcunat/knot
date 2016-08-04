@@ -1,4 +1,6 @@
-#ifdef TRIE_USE_QP
+#include "contrib/hat-trie/hat-trie.h"
+
+#if TRIE_USE_QP
     #include "contrib/qp-trie/qp.c"
     #include "contrib/qp-trie/api-hat.c"
 #else
@@ -14,7 +16,6 @@
 #include <assert.h>
 #include <string.h>
 #include "contrib/hhash.h"
-#include "contrib/hat-trie/hat-trie.h"
 #include "contrib/mempattern.h"
 #include "libknot/errcode.h"
 

@@ -27,12 +27,19 @@
 extern "C" {
 #endif
 
-#ifndef
+#ifndef TRIE_USE_QP
     #define TRIE_USE_QP 1
 #endif
 
 #if TRIE_USE_QP
+
 typedef struct Tbl hattrie_t;
+typedef struct TnodeStack hattrie_iter_t;
+// dummy
+#define TRIE_BUCKET_SIZE (-1)
+// FIXME: ../../../utils/knotc/estimator.c
+#include "contrib/hhash.h"
+
 #else
 
 #include <stdlib.h>
@@ -51,6 +58,7 @@ struct knot_mm;
 #define TRIE_EOK          KNOT_EOK
 
 typedef struct hattrie_t_ hattrie_t;
+typedef struct hattrie_iter_t_ hattrie_iter_t;
 
 #endif // #if TRIE_USE_QP
 

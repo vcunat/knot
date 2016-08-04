@@ -28,7 +28,9 @@ hattrie_t* hattrie_dup (const hattrie_t*, value_t (*nval)(value_t));
  */
 void hattrie_build_index (hattrie_t*);
 
+/** Apply a function to each node, in order. */
 int hattrie_apply_rev (hattrie_t*, int (*f)(value_t*,void*), void* d);
+/** Apply a function to each hash-table node (!), in order. */
 int hattrie_apply_rev_ahtable(hattrie_t* T, int (*f)(void*,void*), void* d);
 
 /** Find the given key in the trie, inserting it if it does not exist, and
@@ -45,17 +47,17 @@ value_t* hattrie_get (hattrie_t*, const char* key, size_t len);
 value_t* hattrie_tryget (hattrie_t*, const char* key, size_t len);
 
 /** Find a given key in the table, returning a NULL pointer if it does not
- * exist. Also set prev to point to previous node.
- * Note: dst must be valid. */
+ * exist. Note: dst must be valid,
+ * Return 0 for exact match, -1 for previous, 1 for not-found. */
 int hattrie_find_leq (hattrie_t*, const char* key, size_t len, value_t** dst);
-/** Find a next value for given key, setting NULL if it does not exist. Returns 1 or 0. */
+/** Find a next value for given key, setting NULL if it does not exist.
+ *  Returns 1 or 0. Basially unused. */
 int hattrie_find_next (hattrie_t* T, const char* key, size_t len, value_t **dst);
 
 /** Delete a given key from trie. Returns 0 if successful or -1 if not found.
  */
 int hattrie_del(hattrie_t* T, const char* key, size_t len);
 
-typedef struct hattrie_iter_t_ hattrie_iter_t;
 
 hattrie_iter_t* hattrie_iter_begin     (const hattrie_t*, bool sorted);
 void            hattrie_iter_next      (hattrie_iter_t*);
