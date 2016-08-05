@@ -134,8 +134,7 @@ typedef struct Tbl {
 	knot_mm_t mm;
 } Tbl;
 
-// Test flags to determine type of this node.
-
+/*! \brief Test flags to determine type of this node. */
 static bool isbranch(const Trie *t) {
 	return t->branch.flags != 0;
 }
@@ -354,14 +353,16 @@ bool Tget_next(Tbl *tbl, const char **pkey, size_t *plen, value_t **pval) {
 
 bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
 	assert(tbl);
-	Trie *t = &tbl->root, *p = NULL; // current and parent pointers
+	if (!tbl->weight)
+		return false;
+	Trie *t = &tbl->root;
 	Tbitmap b = 0;
 	while (isbranch(t)) {
 		__builtin_prefetch(t->branch.twigs);
 		b = twigbit(t, key, len);
 		if (!hastwig(t, b))
 			return false;
-		p = t; t = twig(t, twigoff(t, b));
+		t = twig(t, twigoff(t, b));
 	}
 	if (key_cmp(key, len, t->leaf.key->chars, t->leaf.key->len) != 0)
 		return false;
@@ -369,18 +370,14 @@ bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
 	if (pval != NULL)
 		*pval = t->leaf.val; // we return value_t directly when deleting
 	--tbl->weight;
-	if (p == NULL) { // whole trie was a single leaf
-		assert(tbl->weight == 0);
+	if (unlikely(tbl->weight == 0)) { // whole trie was a single leaf
 		tbl->root = (Trie) { .leaf = { NULL, NULL } };
 		return true;
-	} else {
-		assert(tbl->weight > 0);
 	}
-	t = p; p = NULL; // Becuase t is the usual name
-	uint s, m; TWIGOFFMAX(s, m, t, b);
-	if (m == 2) { // collapse a binary node: move the other child to this node
+	uint s, m; TWIGOFFMAX(s, m, t, b); // child index and child count
+	if (m == 2) { // collapse binary node t: move the other child to this node
 		Trie *twigs = t->branch.twigs;
-		*t = *twig(t, !s);
+		*t = *twig(t, 1-s);
 		mm_free(&tbl->mm, twigs);
 		return true;
 	}
@@ -391,7 +388,7 @@ bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
 	// slightly oversized twig array.
 	Trie *twigs = mm_realloc(&tbl->mm,
 			t->branch.twigs, sizeof(Trie) * (m - 1), sizeof(Trie) * m);
-	if (twigs != NULL)
+	if (likely(twigs))
 		t->branch.twigs = twigs;
 	return true;
 }

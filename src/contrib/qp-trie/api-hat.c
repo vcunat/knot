@@ -57,7 +57,7 @@ value_t* hattrie_get(hattrie_t *trie, const char *key, size_t len) {
 }
 
 int hattrie_find_next(hattrie_t *trie, const char *key, size_t len, value_t **dst) {
-    abort();
+    abort(); // it's dead code, except for tests
     // beware: we update local parameters key and len in-place
     //return Tget_next(trie, &key, &len, dst) ? 1 : 0;
 }
