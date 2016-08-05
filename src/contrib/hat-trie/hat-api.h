@@ -21,6 +21,8 @@ size_t     hattrie_weight (const hattrie_t*);  //< Number of entries
 hattrie_t* hattrie_create_n (unsigned, const struct knot_mm *);
 
 /** Duplicate an existing trie.
+ *
+ *  If nval == NULL, make the new trie empty (but copy mm).
  */
 hattrie_t* hattrie_dup (const hattrie_t*, value_t (*nval)(value_t));
 
@@ -47,7 +49,7 @@ value_t* hattrie_get (hattrie_t*, const char* key, size_t len);
 value_t* hattrie_tryget (hattrie_t*, const char* key, size_t len);
 
 /** Find a given key in the table, returning a NULL pointer if it does not
- * exist. Note: dst must be valid,
+ * exist. Note: dst must be valid.
  * Return 0 for exact match, -1 for previous, 1 for not-found. */
 int hattrie_find_leq (hattrie_t*, const char* key, size_t len, value_t** dst);
 /** Find a next value for given key, setting NULL if it does not exist.
@@ -58,9 +60,10 @@ int hattrie_find_next (hattrie_t* T, const char* key, size_t len, value_t **dst)
  */
 int hattrie_del(hattrie_t* T, const char* key, size_t len);
 
-
+/** Create a new iterator, "pointing" at the "first" element. */
 hattrie_iter_t* hattrie_iter_begin     (const hattrie_t*, bool sorted);
 void            hattrie_iter_next      (hattrie_iter_t*);
+/** Check if the iterator has gone past the "last" element. */
 bool            hattrie_iter_finished  (hattrie_iter_t*);
 void            hattrie_iter_free      (hattrie_iter_t*);
 const char*     hattrie_iter_key       (hattrie_iter_t*, size_t* len);

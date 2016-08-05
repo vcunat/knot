@@ -25,7 +25,9 @@ struct Tbl* Tcreate(knot_mm_t *mm);
 void Tfree(struct Tbl *tbl);
 /*! \brief Clear a trie instance (make it empty). */
 void Tclear(struct Tbl *tbl);
-/*! \brief Duplicate a trie instance, using a value_t transforming function. */
+/*! \brief Duplicate a trie instance, using a value_t transforming function.
+ *
+ *  If nval == NULL, make the new trie empty (but copy mm). */
 struct Tbl* Tdup(const struct Tbl *tbl, value_t (*nval)(value_t));
 
 /*! \brief Return the number of keys in the trie. */
@@ -37,6 +39,7 @@ value_t* Tget_ins(struct Tbl *tbl, const char *key, size_t len);
 
 /*! \brief Search for less-or-equal element.
  *
+ * \param pval must be valid; it will be set to NULL if not found or errored.
  * Return 0 for exact match, -1 for previous, 1 for not-found, or KNOT_ENOMEM. */
 int Tget_leq(struct Tbl *tbl, const char *key, size_t len, value_t **pval);
 

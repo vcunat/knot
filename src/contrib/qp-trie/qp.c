@@ -24,6 +24,7 @@ typedef unsigned int uint;
 
 typedef uint Tbitmap;
 
+/*! \brief Propagate error codes. */
 #define ERR_RETURN(x) \
 	do { \
 		int err_code_ = x; \
@@ -32,17 +33,11 @@ typedef uint Tbitmap;
 	} while (false)
 
 
-// NOTE: 17 bits only; NARROW/SLOW maybe only supports 16
 static uint popcount(Tbitmap w) {
-	#if defined(HAVE_NARROW_CPU) || defined(HAVE_SLOW_POPCOUNT)
-		w -= (w >> 1) & 0x5555;
-		w = (w & 0x3333) + ((w >> 2) & 0x3333);
-		w = (w + (w >> 4)) & 0x0F0F;
-		w = (w + (w >> 8)) & 0x00FF;
-		return(w);
-	#else
-		return((uint)__builtin_popcount(w));
-	#endif
+	uint result = __builtin_popcount(w);
+	assert(result <= 17);
+	return result;
+	// TODO: this implementation may be relatively slow on some HW
 }
 
 /*
@@ -158,35 +153,24 @@ static Tbitmap twigbit(Trie *t, const char *key, uint len) {
 }
 
 static bool hastwig(Trie *t, Tbitmap bit) {
+	assert(isbranch(t));
 	return t->branch.bitmap & bit;
 }
 
 static uint twigoff(Trie *t, Tbitmap b) {
+	assert(isbranch(t));
 	return popcount(t->branch.bitmap & (b-1));
 }
 
 static Trie* twig(Trie *t, uint i) {
+	assert(isbranch(t));
 	return &t->branch.twigs[i];
 }
-
-#ifdef HAVE_NARROW_CPU
-
-#define TWIGOFFMAX(off, max, t, b) do {				\
-		Tbitmap bitmap = t->branch.bitmap;		\
-		uint word = (bitmap << 16) | (bitmap & (b-1));	\
-		uint counts = popcount16x2(word);		\
-		off = counts & 0xFF;				\
-		max = (counts >> 16) & 0xFF;			\
-	} while(0)
-
-#else
 
 #define TWIGOFFMAX(off, max, t, b) do {			\
 		off = twigoff(t, b);			\
 		max = popcount(t->branch.bitmap);	\
 	} while(0)
-
-#endif
 
 /*! \brief Item comparator from hhash.c */
 static int key_cmp(const char *k1, uint k1_len, const char *k2, uint k2_len)
@@ -281,8 +265,12 @@ Tbl* Tdup(const struct Tbl *tbl, value_t (*nval)(value_t)) {
 	Tbl *t = mm_alloc(/*const-cast*/(knot_mm_t*) &tbl->mm, sizeof(Tbl));
 	if (unlikely(!t))
 		return NULL;
-	t->weight = tbl->weight;
 	t->mm = tbl->mm;
+	if (!nval) {
+		t->weight = 0;
+		return t;
+	}
+	t->weight = tbl->weight;
 	if (unlikely(!Tdup_trie(&tbl->root, &t->root, nval, &t->mm))) {
 		Tfree(t);
 		return NULL;
@@ -292,7 +280,7 @@ Tbl* Tdup(const struct Tbl *tbl, value_t (*nval)(value_t)) {
 
 
 size_t Tweight(const struct Tbl *tbl) {
-	return tbl->weight;
+	return tbl ? tbl->weight : 0; // for some reason, HAT supports this on NULL
 }
 
 value_t* Tget_try(Tbl *tbl, const char *key, size_t klen) {
@@ -355,13 +343,15 @@ bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
 	assert(tbl);
 	if (!tbl->weight)
 		return false;
-	Trie *t = &tbl->root;
+	Trie *t = &tbl->root; // current and parent node
+	Tbranch *p = NULL;
 	Tbitmap b = 0;
 	while (isbranch(t)) {
 		__builtin_prefetch(t->branch.twigs);
 		b = twigbit(t, key, len);
 		if (!hastwig(t, b))
 			return false;
+		p = &t->branch;
 		t = twig(t, twigoff(t, b));
 	}
 	if (key_cmp(key, len, t->leaf.key->chars, t->leaf.key->len) != 0)
@@ -370,26 +360,30 @@ bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
 	if (pval != NULL)
 		*pval = t->leaf.val; // we return value_t directly when deleting
 	--tbl->weight;
-	if (unlikely(tbl->weight == 0)) { // whole trie was a single leaf
+	if (unlikely(!p)) { // whole trie was a single leaf
+		assert(tbl->weight == 0);
 		tbl->root = (Trie) { .leaf = { NULL, NULL } };
 		return true;
 	}
-	uint s, m; TWIGOFFMAX(s, m, t, b); // child index and child count
-	if (m == 2) { // collapse binary node t: move the other child to this node
-		Trie *twigs = t->branch.twigs;
-		*t = *twig(t, 1-s);
+	// remove leaf t as child of p
+	int ci = t - p->twigs, // child index via pointer arithmetic
+	    cc = popcount(p->bitmap); // child count
+	assert(ci >= 0 && ci < cc);
+
+	if (cc == 2) { // collapse binary node p: move the other child to this node
+		Trie *twigs = p->twigs;
+		(*(Trie*)p) = twigs[1-ci]; // it might be a leaf or branch
 		mm_free(&tbl->mm, twigs);
 		return true;
 	}
-	memmove(t->branch.twigs+s, t->branch.twigs+s+1, sizeof(Trie) * (m - s - 1));
-	t->branch.bitmap &= ~b;
-	// We have now correctly removed the twig from the trie, so if
-	// realloc() fails we can ignore it and continue to use the
-	// slightly oversized twig array.
+	memmove(p->twigs+ci, p->twigs+ci+1, sizeof(Trie) * (cc - ci - 1));
+	p->bitmap &= ~b;
 	Trie *twigs = mm_realloc(&tbl->mm,
-			t->branch.twigs, sizeof(Trie) * (m - 1), sizeof(Trie) * m);
-	if (likely(twigs))
-		t->branch.twigs = twigs;
+			p->twigs, sizeof(Trie) * (cc - 1), sizeof(Trie) * cc);
+	if (likely(twigs != NULL))
+		p->twigs = twigs;
+		/* We can ignore mm_realloc failure, only beware that next time
+		 * the prev_size passed to it wouldn't be correct; TODO? */
 	return true;
 }
 
@@ -398,33 +392,27 @@ typedef struct TnodeStack {
 	 * - malloc is used directly instead of mm */
 	Trie* *stack;
 	uint len, alen;
-	Trie* stack_init[];
+	Trie* stack_init[2000 / sizeof(Trie*)]; // small enough but should fit most use cases
 } TnodeStack;
 
 /*! \brief Create a node stack containing just the root. */
-static TnodeStack * Tns_create(struct Tbl *tbl) {
+static void Tns_init(TnodeStack *ns, struct Tbl *tbl) {
 	assert(tbl);
-	//int log2 = sizeof(unsigned long)*8 - __builtin_clzl(hint+1);
-	int alen = 2000 / sizeof(Trie*); // small enough but should fit most use cases
-	TnodeStack *ns = malloc(sizeof(TnodeStack) + alen * sizeof(Trie*));
 	ns->stack = ns->stack_init;
 	ns->len = 1;
-	ns->alen = alen;
+	ns->alen = sizeof(ns->stack_init) / sizeof(ns->stack_init[0]);
 	ns->stack[0] = &tbl->root;
-	return ns;
 }
 
-static void Tns_free(TnodeStack *ns) {
-	if (!ns)
+static void Tns_cleanup(TnodeStack *ns) {
+	assert(ns && ns->stack);
+	if (likely(ns->stack == ns->stack_init))
 		return;
-	if (ns->stack != ns->stack_init)
-		free(ns->stack);
-	free(ns);
-}
-/* Wrapper suitable for __attribute__((cleanup)). */
-static void Tns_free_cl(TnodeStack **ns) {
-	Tns_free(*ns);
-	*ns = NULL;
+	free(ns->stack);
+	#ifndef NDEBUG
+		ns->stack = NULL;
+		ns->alen = 0;
+	#endif
 }
 
 static int Tns_longer_alloc(TnodeStack *ns) {
@@ -451,23 +439,25 @@ static inline int Tns_longer(TnodeStack *ns) {
 	return Tns_longer_alloc(ns); // hand-split the part suitable for inlining
 }
 
-/*! \brief Find the branch-point as if searching for a key (leaf if found).
+/*! \brief Find the "branching point" as if searching for a key.
  *
- *  The whole path to the point is kept on the passed stack.
- *  If exact match is found, the corresponding leaf is left on top of the stack;
- *  otherwise a branch is on the top.
- *  \param pmlen Set the number of matched bytes, optionally.
- *  \param pkcmp Set the comparison status to the non-matching leaf, optionally,
- *    (char difference) signifying whether the first non-matching step in the trie
- *    was to a lexicographically greater (pkcmp > 0) or smaller (< 0) subtree.
- *    (The past-end-of-string character is considered to have value -256 for this.)
- *  Return 0 or KNOT_ENOMEM. */
+ *  The whole path to the point is kept on the passed stack;
+ *  always at least the root will remain on the top of it.
+ *  Beware: the precise semantics of this function is rather tricky.
+ *  The top of the stack will contain: the corresponding leaf if exact match is found;
+ *  or the immediate node below a branching-point-on-edge or the branching-point itself.
+ *  \param pinfo Set position of the point of first mismatch (in index and flags).
+ *  \param pfirst Set the value of the first non-matching character (from trie),
+ *      optionally; end-of-string character has value -256 (that's why it's int).
+ *  Return 0 or KNOT_ENOMEM.
+ */
 static int Tns_find_branch(TnodeStack *ns, const char *key, size_t len
-		, uint *pmlen, int *pkcmp)
+		, Tbranch *pinfo, int *pfirst)
 {
-	assert(ns && ns->len);
+	assert(ns && ns->len && pinfo);
+	// First find some leaf with longest matching prefix.
 	while (isbranch(ns->stack[ns->len - 1])) {
- 		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(Tns_longer(ns));
 		Trie *t = ns->stack[ns->len - 1];
 		__builtin_prefetch(t->branch.twigs);
 		Tbitmap b = twigbit(t, key, len);
@@ -480,45 +470,53 @@ static int Tns_find_branch(TnodeStack *ns, const char *key, size_t len
 		ns->stack[ns->len++] = twig(t, i);
 	}
 	Tkey *lkey = ns->stack[ns->len-1]->leaf.key;
-	// Find mlen: index of the first char that differs.
-	uint mlen = 0;
-	while (mlen < MIN(len,lkey->len)) {
-		if (key[mlen] != lkey->chars[mlen])
+	// Find index of the first char that differs.
+	uint index = 0;
+	while (index < MIN(len,lkey->len)) {
+		if (key[index] != lkey->chars[index])
 			break;
 		else
-			++mlen;
+			++index;
 	}
-	if (pmlen)
-		*pmlen = mlen;
-	if (mlen == len && len == lkey->len) { // found equivalent key
-		if (pkcmp)
-			*pkcmp = 0;
-		return 0;
+	pinfo->index = index;
+	if (pfirst)
+		*pfirst = lkey->len > index ? lkey->chars[index] : -256;
+	// Find flags: which half-byte has matched.
+	uint flags;
+	if (index == len && len == lkey->len) { // found equivalent key
+		pinfo->flags = flags = 0;
+		goto success;
 	}
-	// Find the half-byte part of matched length.
-	uint f;
-	//Tbitmap b1;
-	if (likely(mlen < len)) {
-		assert(mlen < lkey->len);
-		byte k2 = (byte)lkey->chars[mlen];
-		byte k1 = (byte)key[mlen];
-		f = ((k1 ^ k2) & 0xf0) ? 1 : 2;
-		if (pkcmp)
-			*pkcmp = key[mlen] - lkey->chars[mlen];
-		//b1 = nibbit(k1, f);
-	} else { // mlen == len: searched key is a prefix of some stored key(s)
-		f = 1;
-		//b1 = 1<<0;
-		if (pkcmp)
-			*pkcmp = (-256) - lkey->chars[mlen];
-		return 0;
+	if (likely(index < MIN(len,lkey->len))) {
+		byte k2 = (byte)lkey->chars[index];
+		byte k1 = (byte)key[index];
+		flags = ((k1 ^ k2) & 0xf0) ? 1 : 2;
+	} else { // one is prefix of another
+		flags = 1;
 	}
+	pinfo->flags = flags;
 	// now go up the trie from the current leaf
 	Tbranch *t;
 	do {
+		if (unlikely(ns->len == 1))
+			goto success; // only the root stays on the stack
+		t = (Tbranch*) ns->stack[ns->len-2];
+		if (t->index < index || (t->index == index && t->flags < flags))
+			goto success;
 		--ns->len;
-		t = (Tbranch*) ns->stack[ns->len-1];
-	} while (t->index > mlen || (t->index == mlen && t->flags > f));
+	} while (true);
+success:
+	#ifndef NDEBUG // invariants on successful return
+		assert(ns->len);
+		if (isbranch(ns->stack[ns->len-1])) {
+			t = &ns->stack[ns->len-1]->branch;
+			assert(t->index > index || (t->index == index && t->flags >= flags));
+		}
+		if (ns->len > 1) {
+			t = &ns->stack[ns->len-2]->branch;
+			assert(t->index < index || (t->index == index && t->flags < flags));
+		}
+	#endif
 	return 0;
 }
 
@@ -611,24 +609,45 @@ static int Tns_next_leaf(TnodeStack *ns) {
 
 int Tget_leq(struct Tbl *tbl, const char *key, size_t len, value_t **pval) {
 	assert(tbl && pval);
+	*pval = NULL; // so on failure we can just return 1;
 	if (tbl->weight == 0)
 		return 1;
 	// First find a key with longest-matching prefix
-	__attribute__((cleanup(Tns_free_cl)))
-		TnodeStack *ns = Tns_create(tbl);
-	int first_diff;
-	ERR_RETURN(Tns_find_branch(ns, key, len, NULL, &first_diff));
-	assert(ns->len > 0); // there should be the root at least
+	__attribute__((cleanup(Tns_cleanup)))
+		TnodeStack ns_local;
+	TnodeStack *ns = &ns_local;
+	Tns_init(ns, tbl);
+	Tbranch bp;
+	int un_leaf; // first unmatched character in the leaf
+	ERR_RETURN(Tns_find_branch(ns, key, len, &bp, &un_leaf));
+	int un_key = bp.index < len ? key[bp.index] : -256;
 	Trie *t = ns->stack[ns->len-1];
-	if (!isbranch(t)) { // found exact match
+	if (bp.flags == 0) { // found exact match
 		if (pval)
 			*pval = &t->leaf.val;
 		return 0;
 	}
+	// Get t: the last node on matching path
+	if (isbranch(t) && t->branch.index == bp.index && t->branch.flags == bp.flags) {
+		// t is OK
+	} else {
+		// the top of the stack was the first unmatched node -> step up
+		if (ns->len == 1) {
+			// root was unmatched already
+			if (un_key < un_leaf)
+				return 1;
+			ERR_RETURN(Tns_last_leaf(ns));
+			goto success;
+		}
+		--ns->len;
+		t = ns->stack[ns->len-1];
+	}
 	// Now we re-do the first "non-matching" step in the trie
 	// but try the previous child if key was less (it may not exist)
 	Tbitmap b = twigbit(t, key, len);
-	int i = twigoff(t, b) - (first_diff < 0);
+	int i = hastwig(t, b)
+		? twigoff(t, b) - (un_key < un_leaf)
+		: twigoff(t, b) - 1 /*twigoff returns successor when !hastwig*/;
 	if (i >= 0) {
 		ERR_RETURN(Tns_longer(ns));
 		ns->stack[ns->len++] = twig(t, i);
@@ -636,126 +655,89 @@ int Tget_leq(struct Tbl *tbl, const char *key, size_t len, value_t **pval) {
 	} else {
 		ERR_RETURN(Tns_prev_leaf(ns)); // KNOT_ENOMEM or 1 for no-leq
 	}
+success:
 	assert(!isbranch(ns->stack[ns->len-1]));
 	*pval = & ns->stack[ns->len-1]->leaf.val;
 	return -1;
 }
 
-
-/*! \brief Find a longest-prefix matching leaf, and optionally return the matching length. */
-static Tleaf* Tfind_prefix_leaf(struct Tbl *tbl, const char *key, size_t len, uint *mlen) {
-	assert(tbl);
-	// Find the most similar leaf node in the trie. We will compare
-	// its key with our new key to find the first differing nibble,
-	// which can be at a lower index than the point at which we
-	// detect a difference.
-	Trie *t = &tbl->root;
-	while (isbranch(t)) {
-		__builtin_prefetch(t->branch.twigs);
-		Tbitmap b = twigbit(t, key, len);
-		// Even if our key is missing from this branch we need to
-		// keep iterating down to a leaf. It doesn't matter which
-		// twig we choose since the keys are all the same up to this
-		// index. Note that blindly using twigoff(t, b) can cause
-		// an out-of-bounds index if it equals twigmax(t).
-		uint i = hastwig(t, b) ? twigoff(t, b) : 0;
-		t = twig(t, i);
-	}
-	Tkey *tkey = t->leaf.key;
-	if (mlen) {
-		// Find i: index of the first char that differs.
-		uint i = 0;
-		while (i < MIN(len,tkey->len)) {
-			if (key[i] != tkey->chars[i])
-				break;
-			else
-				++i;
-		}
-		*mlen = i;
-	}
-	return &t->leaf;
+/*! \brief Initialize a new leaf, copying the key, and returning failure code. */
+static int mk_leaf(Trie *leaf, const char *key, size_t len, knot_mm_t *mm) {
+	Tkey *k = mm_alloc(mm, sizeof(Tkey) + len);
+	if (unlikely(!k))
+		return KNOT_ENOMEM;
+	k->len = len;
+	memcpy(k->chars, key, len);
+	leaf->leaf = (Tleaf){ .val = NULL, .key = k };
+	return 0;
 }
 
 value_t* Tget_ins(struct Tbl *tbl, const char *key, size_t len) {
 	assert(tbl);
 	// First leaf in an empty tbl?
-	if (!tbl->weight) {
-		++tbl->weight;
-		tbl->root.leaf = (Tleaf) {
-			.val = NULL,
-			.key = mm_alloc(&tbl->mm, sizeof(Tkey)+len)
-		};
-		Tkey *nkey = tbl->root.leaf.key;
-		if (nkey == NULL)
+	if (unlikely(!tbl->weight)) {
+		if (unlikely(mk_leaf(&tbl->root, key, len, &tbl->mm)))
 			return NULL;
-		nkey->len = len;
-		memcpy(nkey->chars, key, len);
+		++tbl->weight;
 		return &tbl->root.leaf.val;
 	}
-	uint mlen;
-	Tleaf *tl = Tfind_prefix_leaf(tbl, key, len, &mlen);
-	if (mlen == len && len == tl->key->len) // found equivalent key
-		return &tl->val;
-	// We have the branch's index; what are its flags?
-	uint f;
-	Tbitmap b1;
-	byte k2 = (byte)tl->key->chars[mlen];
-	if (likely(mlen < len)) {
-		byte k1 = (byte)key[mlen];
-		f = ((k1 ^ k2) & 0xf0) ? 1 : 2;
-		b1 = nibbit(k1, f);
-	} else { // mlen == len: inserted key is a prefix of some stored key(s)
-		f = 1;
-		b1 = 1<<0;
-	}
-	// Prepare the new leaf.
-	Tkey *t1key = mm_alloc(&tbl->mm, sizeof(Tkey)+len);
-	if (t1key == NULL)
+	// Find the branching-point
+	__attribute__((cleanup(Tns_cleanup)))
+		TnodeStack ns_local;
+	TnodeStack *ns = &ns_local;
+	Tns_init(ns, tbl);
+	Tbranch bp; // branch-point: index and flags signifying the longest common prefix
+	int k2; // the first unmatched character in the leaf
+	if (unlikely(Tns_find_branch(ns, key, len, &bp, &k2)))
 		return NULL;
-	t1key->len = len;
-	memcpy(t1key->chars, key, len);
-	Trie t1 = { .leaf = { .key = t1key, .val = NULL } };
-	// Find where to insert a branch or grow an existing branch.
-	Trie *t = &tbl->root;
-	// TODO: this re-search might be skipped in most cases if we saved last one or two branches before
-	while (isbranch(t)) {
-		//__builtin_prefetch(t->branch.twigs); // we just passed them; should be cached
-		if (mlen == t->branch.index && f == t->branch.flags)
-			goto growbranch;
-		if (mlen == t->branch.index && f < t->branch.flags)
-			goto newbranch;
-		if (mlen < t->branch.index)
-			goto newbranch;
-		Tbitmap b = twigbit(t, key, len);
-		assert(hastwig(t, b));
-		t = twig(t, twigoff(t, b));
-	}
-newbranch:;
-	Trie *twigs = mm_alloc(&tbl->mm, sizeof(Trie) * 2);
-	if (twigs == NULL)
+	Trie *t = ns->stack[ns->len - 1];
+	if (bp.flags == 0) // the same key was already present
+		return &t->leaf.val;
+	Trie leaf;
+	if (unlikely(mk_leaf(&leaf, key, len, &tbl->mm)))
 		return NULL;
-	Trie t2 = *t; // Save before overwriting.
-	Tbitmap b2 = nibbit(k2, f);
-	t->branch.twigs = twigs;
-	t->branch.flags = f;
-	t->branch.index = mlen;
-	t->branch.bitmap = b1 | b2;
-	*twig(t, twigoff(t, b1)) = t1;
-	*twig(t, twigoff(t, b2)) = t2;
-	++tbl->weight;
-	return &twig(t, twigoff(t, b1))->leaf.val;
-growbranch:;
-	assert(!hastwig(t, b1));
-	uint s, m; TWIGOFFMAX(s, m, t, b1);
-	twigs = mm_realloc(&tbl->mm, t->branch.twigs, sizeof(Trie) * (m + 1), sizeof(Trie) * m);
-	if (twigs == NULL) // TODO: I'm not completely certain this is correct if OOM
-		return NULL;
-	memmove(twigs+s+1, twigs+s, sizeof(Trie) * (m - s));
-	memcpy(twigs+s, &t1, sizeof(Trie));
-	t->branch.twigs = twigs;
-	t->branch.bitmap |= b1;
-	++tbl->weight;
-	return &(twigs+s)->leaf.val;
+
+	if (isbranch(t) && bp.index == t->branch.index && bp.flags == t->branch.flags) {
+		// The node t needs a new leaf child.
+		Tbitmap b1 = twigbit(t, key, len);
+		assert(!hastwig(t, b1));
+		uint s, m; TWIGOFFMAX(s, m, t, b1); // new child position and original child count
+		Trie *twigs = mm_realloc(&tbl->mm, t->branch.twigs,
+				sizeof(Trie) * (m + 1), sizeof(Trie) * m);
+		if (unlikely(!twigs))
+			goto err_leaf;
+		memmove(twigs+s+1, twigs+s, sizeof(Trie) * (m - s));
+		twigs[s] = leaf;
+		t->branch.twigs = twigs;
+		t->branch.bitmap |= b1;
+		++tbl->weight;
+		return &twigs[s].leaf.val;
+	} else {
+		// We need to insert a new binary branch with leaf at *t.
+		// Note: it works the same for the case where we insert above root t.
+		#ifndef NDEBUG
+			if (ns->len > 1) {
+				Trie *pt = ns->stack[ns->len-2];
+				assert(hastwig(pt, twigbit(pt, key, len)));
+			}
+		#endif
+		Trie *twigs = mm_alloc(&tbl->mm, sizeof(Trie) * 2);
+		if (unlikely(!twigs))
+			goto err_leaf;
+		Trie t2 = *t; // Save before overwriting t.
+		t->branch = bp; // copy flags and index
+		t->branch.twigs = twigs;
+		Tbitmap b1 = twigbit(t, key, len);
+		Tbitmap b2 = unlikely(k2 == -256) ? (1<<0) : nibbit(k2, bp.flags);
+		t->branch.bitmap = b1 | b2;
+		*twig(t, twigoff(t, b1)) = leaf;
+		*twig(t, twigoff(t, b2)) = t2;
+		++tbl->weight;
+		return &twig(t, twigoff(t, b1))->leaf.val;
+	};
+err_leaf:
+	mm_free(&tbl->mm, leaf.leaf.key);
+	return NULL;
 }
 
 /*! \brief Apply a function to every value_t*, in order; a recursive solution. */
@@ -776,13 +758,17 @@ int Tapply(struct Tbl *tbl, int (*f)(value_t*,void*), void* d) {
 }
 
 /* Tit_t is implemented via a simple TnodeStack,
- * always pointing to the current leaf, unless we've finished (and ns->len == 0).
+ * always pointing to the current leaf, unless we've finished (i.e. it->len == 0).
  * These are all thin wrappers around static Tns* functions. */
 Tit_t* Tit_begin(struct Tbl *tbl) {
 	assert(tbl);
-	Tit_t *it = Tns_create(tbl);
+	Tit_t *it = malloc(sizeof(TnodeStack));
+	if (!it)
+		return NULL;
+	Tns_init(it, tbl);
 	if (Tns_first_leaf(it)) {
-		Tns_free(it);
+		Tns_cleanup(it);
+		free(it);
 		return NULL;
 	}
 	return it;
@@ -795,10 +781,14 @@ int Tit_next(Tit_t *it) {
 	return err;
 }
 bool Tit_finished(Tit_t *it) {
+	assert(it);
 	return it->len == 0;
 }
 void Tit_free(Tit_t *it) {
-	Tns_free(it);
+	if (!it)
+		return;
+	Tns_cleanup(it);
+	free(it);
 }
 const char* Tit_key(Tit_t *it, size_t *len) {
 	assert(it && it->len);
