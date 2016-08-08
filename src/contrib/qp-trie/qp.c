@@ -514,7 +514,8 @@ success:
 		}
 		if (ns->len > 1) {
 			t = &ns->stack[ns->len-2]->branch;
-			assert(t->index < index || (t->index == index && t->flags < flags));
+			assert(t->index < index || (t->index == index
+						&& (t->flags < flags || (t->flags == 1 && flags == 0))));
 		}
 	#endif
 	return 0;
