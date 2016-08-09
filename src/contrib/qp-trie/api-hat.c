@@ -84,8 +84,13 @@ bool hattrie_iter_finished(hattrie_iter_t *it) {
 void hattrie_iter_free(hattrie_iter_t *it) {
     Tit_free(it);
 }
-const char* hattrie_iter_key (hattrie_iter_t *it, size_t *len) {
-    return Tit_key(it, len);
+const char* hattrie_iter_key(hattrie_iter_t *it, size_t *plen) {
+    // it's a bit cumbersome to change the type of `plen` safely
+    uint32_t len32;
+    const char *res = Tit_key(it, &len32);
+    if (plen)
+        *plen = len32;
+    return res;
 }
 value_t* hattrie_iter_val(hattrie_iter_t *it) {
     return Tit_val(it);

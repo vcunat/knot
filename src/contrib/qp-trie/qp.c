@@ -60,8 +60,7 @@ static uint popcount16x2(uint w) {
 
 /*! \brief What we use as trie key internally. */
 typedef struct Tkey {
-	uint len; // uint should be enough as the key length;
-			// probably even 16 bits would be. TODO: apply everywhere?
+	uint32_t len; // 32 bits are enough for key lengths; probably even 16 bits would be.
 	char chars[];
 } Tkey;
 
@@ -142,7 +141,7 @@ static Tbitmap nibbit(byte k, uint flags) {
 }
 
 /*~ \brief Extract a nibble from a key and turn it into a bitmask. */
-static Tbitmap twigbit(Trie *t, const char *key, uint len) {
+static Tbitmap twigbit(Trie *t, const char *key, uint32_t len) {
 	assert(isbranch(t));
 	uint i = t->branch.index;
 
@@ -173,7 +172,7 @@ static Trie* twig(Trie *t, uint i) {
 	} while(0)
 
 /*! \brief Item comparator from hhash.c */
-static int key_cmp(const char *k1, uint k1_len, const char *k2, uint k2_len)
+static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_len)
 {
 	int ret = memcmp(k1, k2, MIN(k1_len, k2_len));
 	if (ret != 0) {
@@ -283,25 +282,25 @@ size_t Tweight(const struct Tbl *tbl) {
 	return tbl ? tbl->weight : 0; // for some reason, HAT supports this on NULL
 }
 
-value_t* Tget_try(Tbl *tbl, const char *key, size_t klen) {
+value_t* Tget_try(Tbl *tbl, const char *key, uint32_t len) {
 	assert(tbl);
 	if (!tbl->weight)
 		return NULL;
 	Trie *t = &tbl->root;
 	while (isbranch(t)) {
 		__builtin_prefetch(t->branch.twigs);
-		Tbitmap b = twigbit(t, key, klen);
+		Tbitmap b = twigbit(t, key, len);
 		if (!hastwig(t, b))
 			return NULL;
 		t = twig(t, twigoff(t, b));
 	}
-	if (key_cmp(key, klen, t->leaf.key->chars, t->leaf.key->len) != 0)
+	if (key_cmp(key, len, t->leaf.key->chars, t->leaf.key->len) != 0)
 		return NULL;
 	return &t->leaf.val;
 }
 
 // TODO: review
-static bool next_rec(Trie *t, const char **pkey, size_t *plen, value_t **pval) {
+static bool next_rec(Trie *t, const char **pkey, uint32_t *plen, value_t **pval) {
 	if(isbranch(t)) {
 		// Recurse to find either this leaf (*pkey != NULL)
 		// or the next one (*pkey == NULL).
@@ -330,7 +329,7 @@ static bool next_rec(Trie *t, const char **pkey, size_t *plen, value_t **pval) {
 }
 
 // TODO: review
-bool Tget_next(Tbl *tbl, const char **pkey, size_t *plen, value_t **pval) {
+bool Tget_next(Tbl *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
 	if (tbl == NULL) {
 		*pkey = NULL;
 		*plen = 0;
@@ -339,7 +338,7 @@ bool Tget_next(Tbl *tbl, const char **pkey, size_t *plen, value_t **pval) {
 	return next_rec(&tbl->root, pkey, plen, pval);
 }
 
-bool Tdel(struct Tbl *tbl, const char *key, size_t len, value_t *pval) {
+bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
 	assert(tbl);
 	if (!tbl->weight)
 		return false;
@@ -391,7 +390,7 @@ typedef struct TnodeStack {
 	/* Notes:
 	 * - malloc is used directly instead of mm */
 	Trie* *stack;
-	uint len, alen;
+	uint32_t len, alen;
 	Trie* stack_init[2000 / sizeof(Trie*)]; // small enough but should fit most use cases
 } TnodeStack;
 
@@ -451,7 +450,7 @@ static inline int Tns_longer(TnodeStack *ns) {
  *      optionally; end-of-string character has value -256 (that's why it's int).
  *  Return 0 or KNOT_ENOMEM.
  */
-static int Tns_find_branch(TnodeStack *ns, const char *key, size_t len
+static int Tns_find_branch(TnodeStack *ns, const char *key, uint32_t len
 		, Tbranch *pinfo, int *pfirst)
 {
 	assert(ns && ns->len && pinfo);
@@ -471,7 +470,7 @@ static int Tns_find_branch(TnodeStack *ns, const char *key, size_t len
 	}
 	Tkey *lkey = ns->stack[ns->len-1]->leaf.key;
 	// Find index of the first char that differs.
-	uint index = 0;
+	uint32_t index = 0;
 	while (index < MIN(len,lkey->len)) {
 		if (key[index] != lkey->chars[index])
 			break;
@@ -608,7 +607,7 @@ static int Tns_next_leaf(TnodeStack *ns) {
 	} while (true);
 }
 
-int Tget_leq(struct Tbl *tbl, const char *key, size_t len, value_t **pval) {
+int Tget_leq(struct Tbl *tbl, const char *key, uint32_t len, value_t **pval) {
 	assert(tbl && pval);
 	*pval = NULL; // so on failure we can just return 1;
 	if (tbl->weight == 0)
@@ -663,7 +662,7 @@ success:
 }
 
 /*! \brief Initialize a new leaf, copying the key, and returning failure code. */
-static int mk_leaf(Trie *leaf, const char *key, size_t len, knot_mm_t *mm) {
+static int mk_leaf(Trie *leaf, const char *key, uint32_t len, knot_mm_t *mm) {
 	Tkey *k = mm_alloc(mm, sizeof(Tkey) + len);
 	if (unlikely(!k))
 		return KNOT_ENOMEM;
@@ -673,7 +672,7 @@ static int mk_leaf(Trie *leaf, const char *key, size_t len, knot_mm_t *mm) {
 	return 0;
 }
 
-value_t* Tget_ins(struct Tbl *tbl, const char *key, size_t len) {
+value_t* Tget_ins(struct Tbl *tbl, const char *key, uint32_t len) {
 	assert(tbl);
 	// First leaf in an empty tbl?
 	if (unlikely(!tbl->weight)) {
@@ -791,7 +790,7 @@ void Tit_free(Tit_t *it) {
 	Tns_cleanup(it);
 	free(it);
 }
-const char* Tit_key(Tit_t *it, size_t *len) {
+const char* Tit_key(Tit_t *it, uint32_t *len) {
 	assert(it && it->len);
 	Trie *t = it->stack[it->len-1];
 	assert(!isbranch(t));
