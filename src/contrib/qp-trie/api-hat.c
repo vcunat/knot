@@ -4,7 +4,7 @@
 
 #include <stdio.h> // XXX: just debug
 
-typedef struct Tbl hattrie_t;
+typedef struct qp_trie hattrie_t; // define again, to be sure we didn't mix it up
 #include "contrib/hat-trie/hat-api.h"
 
 #include "contrib/qp-trie/qp.h"

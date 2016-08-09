@@ -33,8 +33,8 @@ extern "C" {
 
 #if TRIE_USE_QP
 
-typedef struct Tbl hattrie_t;
-typedef struct TnodeStack hattrie_iter_t;
+typedef struct qp_trie hattrie_t;
+typedef struct qp_trie_it hattrie_iter_t;
 // dummy
 #define TRIE_BUCKET_SIZE (-1)
 // FIXME: ../../../utils/knotc/estimator.c

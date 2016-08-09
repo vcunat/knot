@@ -15,7 +15,7 @@
 
 typedef unsigned char byte;
 typedef unsigned int uint;
-typedef uint Tbitmap; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive). */
+typedef uint bitmap_t; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive). */
 
 /*! \brief Propagate error codes. */
 #define ERR_RETURN(x) \
@@ -30,101 +30,83 @@ typedef uint Tbitmap; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive)
  *
  * \TODO This implementation may be relatively slow on some HW.
  */
-static uint popcount(Tbitmap w) {
+static uint popcount(bitmap_t w) {
 	assert((w & ~((1<<17)-1)) == 0); // using the least-important 17 bits
 	uint result = __builtin_popcount(w);
 	return result;
 }
 
 
-// A trie node is two words on 64 bit machines, or three on 32 bit
-// machines. A node can be a leaf or a branch. In a leaf, the value
-// pointer must be word-aligned to allow for the tag bits.
+/*! \brief A trie node is either leaf_t or branch_t. */
+typedef union node node_t;
 
 /*! \brief What we use as trie key internally. */
-typedef struct Tkey {
+typedef struct tkey tkey_t;
+/*! \brief Leaf of trie. */
+typedef struct leaf {
+	tkey_t *key; /*!< The pointer must be aligned to 4-byte multiples! */
+	value_t val;
+} leaf_t;
+struct tkey {
 	uint32_t len; // 32 bits are enough for key lengths; probably even 16 bits would be.
 	char chars[];
-} Tkey;
+};
 
-typedef struct Tleaf {
-	Tkey *key;
-	value_t val;
-} Tleaf;
-
-// Branch nodes are distinguished from leaf nodes using a couple
-// of flag bits which act as a dynamic type tag. They can be:
-//
-// 0 -> node is a leaf
-// 1 -> node is a branch, testing more-important nibble
-// 2 -> node is a branch, testing less-important nibble
-//
-// A branch node is laid out so that the flag bits correspond to the
-// least significant bits of one of the leaf node pointers. In a
-// leaf node, that pointer must be word-aligned so that its flag bits
-// are zero. We have chosen to place this restriction on the value
-// pointer.
-//
-// A branch contains the index of the byte that it tests. The combined
-// value index << 2 | flags increases along the key in big-endian
-// lexicographic order, and increases as you go deeper into the trie.
-// All the keys below a branch are identical up to the nibble
-// identified by the branch.
-//
-// A branch has a bitmap of which subtries ("twigs") are present. The
-// flags, index, and bitmap are packed into one word. The other word
-// is a pointer to an array of trie nodes, one for each twig that is
-// present.
-
-// XXX We hope that the compiler will not punish us for abusing unions.
-
-// XXX This currently assumes a 64 bit little endian machine.
-// On a 32 bit machine we could perhaps fit a branch in to two words
-// without restricting the key length by making the index relative
-// instead of absolute. If the gap between nodes is larger than a 16
-// bit offset allows, we can insert a stepping-stone branch with only
-// one twig. This would make the code a bit more complicated...
-
-typedef struct Tbranch {
+/*!
+ * \brief Branch node of trie.
+ *
+ * - The flags distinguish whether the node is a leaf_t (0), or a branch
+ *   testing the more-important nibble (1) or the less-important one (2).
+ * - It stores the index of the byte that the node tests.  The combined
+ *   value (index*4 + flags) increases in branch nodes as you go deeper
+ *   into the trie.  All the keys below a branch are identical up to the
+ *   nibble identified by the branch.  Indices have to be stored because
+ *   we skip any branch nodes that would have a single child.
+ *   (Consequently, the skipped parts of key have to be validated in a leaf.)
+ * - The bitmap indicates which subtries are present.  The present child nodes
+ *   are stored in the twigs array (with no holes between them).
+ * \note The branch nodes are never allocated individually, but they are
+ *   always part of either the root node or the twigs array of the parent.
+ * \TODO other than x86_64 ABI might be broken.
+ *   The order of bit fields within an allocation unit is undefined by standard!
+ *   http://en.cppreference.com/w/c/language/bit_field
+ *   but it's in ABI
+ *   https://gcc.gnu.org/onlinedocs/gcc-6.1.0/gcc/Structures-unions-enumerations-and-bit-fields-implementation.html#Structures-unions-enumerations-and-bit-fields-implementation
+ *   http://www.x86-64.org/documentation/abi.pdf (pg. 13,14)
+ */
+typedef struct branch {
 	uint64_t
 		flags : 2,
 		index : 45,
-		bitmap : 17; // the first bit is for end-of-string child
-	union Trie *twigs;
-	/* TODO: other than x86_64 ABI might be broken.
-	 * > The order of bit fields within an allocation unit is undefined by standard!
-	 * http://en.cppreference.com/w/c/language/bit_field
-	 * but it's in ABI
-	 * https://gcc.gnu.org/onlinedocs/gcc-6.1.0/gcc/Structures-unions-enumerations-and-bit-fields-implementation.html#Structures-unions-enumerations-and-bit-fields-implementation
-	 * http://www.x86-64.org/documentation/abi.pdf (pg. 13,14)
-	 * */
-} Tbranch;
+		bitmap : 17; /*!< The first bitmap bit is for end-of-string child. */
+	node_t *twigs;
+} branch_t;
 
-typedef union Trie {
-	struct Tleaf leaf;
-	struct Tbranch branch;
-} Trie;
+union node {
+	struct leaf leaf;
+	struct branch branch;
+};
 
-typedef struct Tbl {
-	union Trie root; // undefined when weight == 0, preferably all zeroed
+typedef struct qp_trie {
+	node_t root; // undefined when weight == 0, preferably all zeroed
 	size_t weight;
 	knot_mm_t mm;
-} Tbl;
+} trie_t;
 
 /*! \brief Test flags to determine type of this node. */
-static bool isbranch(const Trie *t) {
+static bool isbranch(const node_t *t) {
 	return t->branch.flags != 0;
 }
 
 /*! \brief Make a bitmask for testing a branch bitmap. */
-static Tbitmap nibbit(byte k, uint flags) {
+static bitmap_t nibbit(byte k, uint flags) {
 	uint shift = (2 - flags) << 2;
 	uint nibble = (k >> shift) & 0xf;
 	return 1 << (nibble + 1/*because of prefix keys*/);
 }
 
 /*! \brief Extract a nibble from a key and turn it into a bitmask. */
-static Tbitmap twigbit(Trie *t, const char *key, uint32_t len) {
+static bitmap_t twigbit(node_t *t, const char *key, uint32_t len) {
 	assert(isbranch(t));
 	uint i = t->branch.index;
 
@@ -135,19 +117,19 @@ static Tbitmap twigbit(Trie *t, const char *key, uint32_t len) {
 }
 
 /*! \brief Test if a branch node has a child indicated by a bitmask. */
-static bool hastwig(Trie *t, Tbitmap bit) {
+static bool hastwig(node_t *t, bitmap_t bit) {
 	assert(isbranch(t));
 	return t->branch.bitmap & bit;
 }
 
 /*! \brief Compute offset of an existing child in a branch node. */
-static uint twigoff(Trie *t, Tbitmap b) {
+static uint twigoff(node_t *t, bitmap_t b) {
 	assert(isbranch(t));
 	return popcount(t->branch.bitmap & (b-1));
 }
 
 /*! \brief Get pointer to a particular child of a branch node. */
-static Trie* twig(Trie *t, uint i) {
+static node_t* twig(node_t *t, uint i) {
 	assert(isbranch(t));
 	return &t->branch.twigs[i];
 }
@@ -180,10 +162,10 @@ static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_
 	return 1;
 }
 
-struct Tbl* Tcreate(knot_mm_t *mm) {
-	Tbl *trie = mm_alloc(mm, sizeof(Tbl));
+struct qp_trie* Tcreate(knot_mm_t *mm) {
+	trie_t *trie = mm_alloc(mm, sizeof(trie_t));
 	if (trie != NULL)
-		trie->root = (Trie) { .leaf = { NULL, NULL } };
+		trie->root = (node_t) { .leaf = { NULL, NULL } };
 		trie->weight = 0;
 		if (mm != NULL)
 			trie->mm = *mm;
@@ -193,18 +175,18 @@ struct Tbl* Tcreate(knot_mm_t *mm) {
 }
 
 /*! \brief Free anything under the trie node, except for the passed pointer itself. */
-static void TfreeTrie(union Trie *trie, knot_mm_t *mm) {
+static void TfreeTrie(node_t *trie, knot_mm_t *mm) {
 	if (!isbranch(trie)) {
 		mm_free(mm, trie->leaf.key);
 	} else {
-		Tbranch *b = &trie->branch;
+		branch_t *b = &trie->branch;
 		int len = popcount(b->bitmap);
 		for (int i = 0; i < len; ++i)
 			TfreeTrie(b->twigs + i, mm);
 		mm_free(mm, b->twigs);
 	}
 }
-void Tfree(struct Tbl *tbl) {
+void Tfree(struct qp_trie *tbl) {
 	if (tbl == NULL)
 		return;
 	if (tbl->weight)
@@ -212,20 +194,20 @@ void Tfree(struct Tbl *tbl) {
 	mm_free(&tbl->mm, tbl);
 }
 
-void Tclear(struct Tbl *tbl) {
+void Tclear(struct qp_trie *tbl) {
 	assert(tbl);
 	if (!tbl->weight)
 		return;
 	TfreeTrie(&tbl->root, &tbl->mm);
-	tbl->root = (Trie) { .leaf = { NULL, NULL } };
+	tbl->root = (node_t) { .leaf = { NULL, NULL } };
 	tbl->weight = 0;
 }
 
 /*! \brief Duplicate everything under the trie node (assumed allocated itself). */
-static int Tdup_trie(const Trie *t1, Trie *t2, value_t (*nval)(value_t), knot_mm_t *mm) {
+static int Tdup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), knot_mm_t *mm) {
 	if (!isbranch(t1)) {
-		Tkey *key1 = t1->leaf.key;
-		Tkey *key2 = mm_alloc(mm, sizeof(Tkey) + key1->len);
+		tkey_t *key1 = t1->leaf.key;
+		tkey_t *key2 = mm_alloc(mm, sizeof(tkey_t) + key1->len);
 		if (!key2)
 			return KNOT_ENOMEM;
 		key2->len = key1->len;
@@ -234,11 +216,11 @@ static int Tdup_trie(const Trie *t1, Trie *t2, value_t (*nval)(value_t), knot_mm
 		t2->leaf.val = nval(t1->leaf.val);
 		return 0;
 	}
-	memcpy(t2, t1, sizeof(Tbranch)); // flags etc.; will rewrite the pointer
+	memcpy(t2, t1, sizeof(branch_t)); // flags etc.; will rewrite the pointer
 	int child_count = popcount(t1->branch.bitmap);
-	t2->branch.twigs = mm_alloc(mm, sizeof(Trie) * child_count);
-	Trie *twigs1 = t1->branch.twigs;
-	Trie *twigs2 = t2->branch.twigs;
+	t2->branch.twigs = mm_alloc(mm, sizeof(node_t) * child_count);
+	node_t *twigs1 = t1->branch.twigs;
+	node_t *twigs2 = t2->branch.twigs;
 	if (unlikely(!twigs2))
 		return KNOT_ENOMEM;
 	for (int i = 0; i < child_count; ++i) {
@@ -251,8 +233,8 @@ static int Tdup_trie(const Trie *t1, Trie *t2, value_t (*nval)(value_t), knot_mm
 	}
 	return 0;
 }
-Tbl* Tdup(const struct Tbl *tbl, value_t (*nval)(value_t)) {
-	Tbl *t = mm_alloc(/*const-cast*/(knot_mm_t*) &tbl->mm, sizeof(Tbl));
+trie_t* Tdup(const struct qp_trie *tbl, value_t (*nval)(value_t)) {
+	trie_t *t = mm_alloc(/*const-cast*/(knot_mm_t*) &tbl->mm, sizeof(trie_t));
 	if (unlikely(!t))
 		return NULL;
 	t->mm = tbl->mm;
@@ -269,18 +251,18 @@ Tbl* Tdup(const struct Tbl *tbl, value_t (*nval)(value_t)) {
 }
 
 
-size_t Tweight(const struct Tbl *tbl) {
+size_t Tweight(const struct qp_trie *tbl) {
 	return tbl ? tbl->weight : 0; // for some reason, HAT supports this on NULL
 }
 
-value_t* Tget_try(Tbl *tbl, const char *key, uint32_t len) {
+value_t* Tget_try(trie_t *tbl, const char *key, uint32_t len) {
 	assert(tbl);
 	if (!tbl->weight)
 		return NULL;
-	Trie *t = &tbl->root;
+	node_t *t = &tbl->root;
 	while (isbranch(t)) {
 		__builtin_prefetch(t->branch.twigs);
-		Tbitmap b = twigbit(t, key, len);
+		bitmap_t b = twigbit(t, key, len);
 		if (!hastwig(t, b))
 			return NULL;
 		t = twig(t, twigoff(t, b));
@@ -291,11 +273,11 @@ value_t* Tget_try(Tbl *tbl, const char *key, uint32_t len) {
 }
 
 // TODO: review
-static bool next_rec(Trie *t, const char **pkey, uint32_t *plen, value_t **pval) {
+static bool next_rec(node_t *t, const char **pkey, uint32_t *plen, value_t **pval) {
 	if(isbranch(t)) {
 		// Recurse to find either this leaf (*pkey != NULL)
 		// or the next one (*pkey == NULL).
-		Tbitmap b = twigbit(t, *pkey, *plen);
+		bitmap_t b = twigbit(t, *pkey, *plen);
 		uint s, m; TWIGOFFMAX(s, m, t, b);
 		for(; s < m; s++)
 			if(next_rec(twig(t, s), pkey, plen, pval))
@@ -320,7 +302,7 @@ static bool next_rec(Trie *t, const char **pkey, uint32_t *plen, value_t **pval)
 }
 
 // TODO: review
-bool Tget_next(Tbl *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
+bool Tget_next(trie_t *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
 	if (tbl == NULL) {
 		*pkey = NULL;
 		*plen = 0;
@@ -329,13 +311,13 @@ bool Tget_next(Tbl *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
 	return next_rec(&tbl->root, pkey, plen, pval);
 }
 
-bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
+bool Tdel(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval) {
 	assert(tbl);
 	if (!tbl->weight)
 		return false;
-	Trie *t = &tbl->root; // current and parent node
-	Tbranch *p = NULL;
-	Tbitmap b = 0;
+	node_t *t = &tbl->root; // current and parent node
+	branch_t *p = NULL;
+	bitmap_t b = 0;
 	while (isbranch(t)) {
 		__builtin_prefetch(t->branch.twigs);
 		b = twigbit(t, key, len);
@@ -352,7 +334,7 @@ bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
 	--tbl->weight;
 	if (unlikely(!p)) { // whole trie was a single leaf
 		assert(tbl->weight == 0);
-		tbl->root = (Trie) { .leaf = { NULL, NULL } };
+		tbl->root = (node_t) { .leaf = { NULL, NULL } };
 		return true;
 	}
 	// remove leaf t as child of p
@@ -361,15 +343,15 @@ bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
 	assert(ci >= 0 && ci < cc);
 
 	if (cc == 2) { // collapse binary node p: move the other child to this node
-		Trie *twigs = p->twigs;
-		(*(Trie*)p) = twigs[1-ci]; // it might be a leaf or branch
+		node_t *twigs = p->twigs;
+		(*(node_t*)p) = twigs[1-ci]; // it might be a leaf or branch
 		mm_free(&tbl->mm, twigs);
 		return true;
 	}
-	memmove(p->twigs+ci, p->twigs+ci+1, sizeof(Trie) * (cc - ci - 1));
+	memmove(p->twigs+ci, p->twigs+ci+1, sizeof(node_t) * (cc - ci - 1));
 	p->bitmap &= ~b;
-	Trie *twigs = mm_realloc(&tbl->mm,
-			p->twigs, sizeof(Trie) * (cc - 1), sizeof(Trie) * cc);
+	node_t *twigs = mm_realloc(&tbl->mm,
+			p->twigs, sizeof(node_t) * (cc - 1), sizeof(node_t) * cc);
 	if (likely(twigs != NULL))
 		p->twigs = twigs;
 		/* We can ignore mm_realloc failure, only beware that next time
@@ -377,17 +359,23 @@ bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
 	return true;
 }
 
-/*! \brief Stack of nodes, storing a path down a trie. */
-typedef struct TnodeStack {
-	Trie* *stack;  /*!< The stack; malloc is used directly instead of mm. */
+/*!
+ * \brief Stack of nodes, storing a path down a trie.
+ *
+ * The structure also serves directly as the public qp_trie_it_t type,
+ * in which case it always points to the current leaf, unless we've finished
+ * (i.e. it->len == 0).
+ */
+typedef struct qp_trie_it {
+	node_t* *stack;  /*!< The stack; malloc is used directly instead of mm. */
 	uint32_t len;  /*!< Current length of the stack. */
 	uint32_t alen; /*!< Allocated/available length of the stack. */
 	/*! \brief Initial storage for \a stack; it should fit in most use cases. */
-	Trie* stack_init[2000 / sizeof(Trie*)];
-} TnodeStack;
+	node_t* stack_init[2000 / sizeof(node_t*)];
+} nstack_t;
 
 /*! \brief Create a node stack containing just the root. */
-static void Tns_init(TnodeStack *ns, struct Tbl *tbl) {
+static void Tns_init(nstack_t *ns, struct qp_trie *tbl) {
 	assert(tbl);
 	ns->stack = ns->stack_init;
 	ns->len = 1;
@@ -396,7 +384,7 @@ static void Tns_init(TnodeStack *ns, struct Tbl *tbl) {
 }
 
 /*! \brief Free inside of the stack, i.e. not the passed pointer itself. */
-static void Tns_cleanup(TnodeStack *ns) {
+static void Tns_cleanup(nstack_t *ns) {
 	assert(ns && ns->stack);
 	if (likely(ns->stack == ns->stack_init))
 		return;
@@ -408,14 +396,14 @@ static void Tns_cleanup(TnodeStack *ns) {
 }
 
 /*! \brief Allocate more space for the stack. */
-static int Tns_longer_alloc(TnodeStack *ns) {
+static int Tns_longer_alloc(nstack_t *ns) {
 	ns->alen *= 2;
-	size_t new_size = sizeof(TnodeStack) + ns->alen * sizeof(Trie*);
-	Trie* *st;
+	size_t new_size = sizeof(nstack_t) + ns->alen * sizeof(node_t*);
+	node_t* *st;
 	if (ns->stack == ns->stack_init) {
 		st = malloc(new_size);
 		if (st != NULL)
-			memcpy(st, ns->stack, ns->len * sizeof(Trie*));
+			memcpy(st, ns->stack, ns->len * sizeof(node_t*));
 	} else {
 		st = realloc(ns->stack, new_size);
 	}
@@ -425,7 +413,7 @@ static int Tns_longer_alloc(TnodeStack *ns) {
 	return 0;
 }
 /*! \brief Ensure the node stack can be extended by one. */
-static inline int Tns_longer(TnodeStack *ns) {
+static inline int Tns_longer(nstack_t *ns) {
 	// get a longer stack if needed
 	if (likely(ns->len < ns->alen))
 		return 0;
@@ -445,16 +433,16 @@ static inline int Tns_longer(TnodeStack *ns) {
  *      optionally; end-of-string character has value -256 (that's why it's int).
  *  Return 0 or KNOT_ENOMEM.
  */
-static int Tns_find_branch(TnodeStack *ns, const char *key, uint32_t len
-		, Tbranch *pinfo, int *pfirst)
+static int Tns_find_branch(nstack_t *ns, const char *key, uint32_t len
+		, branch_t *pinfo, int *pfirst)
 {
 	assert(ns && ns->len && pinfo);
 	// First find some leaf with longest matching prefix.
 	while (isbranch(ns->stack[ns->len - 1])) {
 		ERR_RETURN(Tns_longer(ns));
-		Trie *t = ns->stack[ns->len - 1];
+		node_t *t = ns->stack[ns->len - 1];
 		__builtin_prefetch(t->branch.twigs);
-		Tbitmap b = twigbit(t, key, len);
+		bitmap_t b = twigbit(t, key, len);
 		// Even if our key is missing from this branch we need to
 		// keep iterating down to a leaf. It doesn't matter which
 		// twig we choose since the keys are all the same up to this
@@ -463,7 +451,7 @@ static int Tns_find_branch(TnodeStack *ns, const char *key, uint32_t len
 		uint i = hastwig(t, b) ? twigoff(t, b) : 0;
 		ns->stack[ns->len++] = twig(t, i);
 	}
-	Tkey *lkey = ns->stack[ns->len-1]->leaf.key;
+	tkey_t *lkey = ns->stack[ns->len-1]->leaf.key;
 	// Find index of the first char that differs.
 	uint32_t index = 0;
 	while (index < MIN(len,lkey->len)) {
@@ -490,11 +478,11 @@ static int Tns_find_branch(TnodeStack *ns, const char *key, uint32_t len
 	}
 	pinfo->flags = flags;
 	// now go up the trie from the current leaf
-	Tbranch *t;
+	branch_t *t;
 	do {
 		if (unlikely(ns->len == 1))
 			goto success; // only the root stays on the stack
-		t = (Tbranch*) ns->stack[ns->len-2];
+		t = (branch_t*) ns->stack[ns->len-2];
 		if (t->index < index || (t->index == index && t->flags < flags))
 			goto success;
 		--ns->len;
@@ -520,11 +508,11 @@ success:
  *
  * \return 0 or KNOT_ENOMEM. 
  */
-static int Tns_last_leaf(TnodeStack *ns) {
+static int Tns_last_leaf(nstack_t *ns) {
 	assert(ns);
 	do {
 		ERR_RETURN(Tns_longer(ns));
-		Trie *t = ns->stack[ns->len - 1];
+		node_t *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
 		int lasti = popcount(t->branch.bitmap) - 1;
@@ -537,11 +525,11 @@ static int Tns_last_leaf(TnodeStack *ns) {
  *
  * \return 0 or KNOT_ENOMEM.
  */
-static int Tns_first_leaf(TnodeStack *ns) {
+static int Tns_first_leaf(nstack_t *ns) {
 	assert(ns);
 	do {
 		ERR_RETURN(Tns_longer(ns));
-		Trie *t = ns->stack[ns->len - 1];
+		node_t *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
 		ns->stack[ns->len++] = twig(t, 0);
@@ -554,10 +542,10 @@ static int Tns_first_leaf(TnodeStack *ns) {
  * \note Prefix leaf under the current node DOES count (if present; perhaps questionable).
  * \return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
  */
-static int Tns_prev_leaf(TnodeStack *ns) {
+static int Tns_prev_leaf(nstack_t *ns) {
 	assert(ns && ns->len > 0);
 
-	Trie *t = ns->stack[ns->len-1];
+	node_t *t = ns->stack[ns->len-1];
 	if (hastwig(t, 1<<0)) { // the prefix leaf
 		t = twig(t, 0);
 		ERR_RETURN(Tns_longer(ns));
@@ -569,7 +557,7 @@ static int Tns_prev_leaf(TnodeStack *ns) {
 		if (ns->len < 2)
 			return 1; // root without empty key has no previous leaf
 		t = ns->stack[ns->len-1];
-		Trie *p = ns->stack[ns->len-2];
+		node_t *p = ns->stack[ns->len-2];
 		int pindex = t - p->branch.twigs; // index in parent via pointer arithmetic
 		assert(pindex >= 0 && pindex <= 16);
 		if (pindex > 0) { // t isn't the first child -> go down the previous one
@@ -586,10 +574,10 @@ static int Tns_prev_leaf(TnodeStack *ns) {
  * \note Prefix leaf or anything else under the current node DOES count.
  * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
  */
-static int Tns_next_leaf(TnodeStack *ns) {
+static int Tns_next_leaf(nstack_t *ns) {
 	assert(ns && ns->len > 0);
 
-	Trie *t = ns->stack[ns->len-1];
+	node_t *t = ns->stack[ns->len-1];
 	if (isbranch(t))
 		return Tns_first_leaf(ns);
 
@@ -597,7 +585,7 @@ static int Tns_next_leaf(TnodeStack *ns) {
 		if (ns->len < 2)
 			return 1; // not found, as no more parent is available
 		t = ns->stack[ns->len-1];
-		Trie *p = ns->stack[ns->len-2];
+		node_t *p = ns->stack[ns->len-2];
 		int pindex = t - p->branch.twigs; // index in parent via pointer arithmetic
 		assert(pindex >= 0 && pindex <= 16);
 		int pcount = popcount(p->branch.bitmap);
@@ -610,21 +598,21 @@ static int Tns_next_leaf(TnodeStack *ns) {
 	} while (true);
 }
 
-int Tget_leq(struct Tbl *tbl, const char *key, uint32_t len, value_t **pval) {
+int Tget_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t **pval) {
 	assert(tbl && pval);
 	*pval = NULL; // so on failure we can just return 1;
 	if (tbl->weight == 0)
 		return 1;
 	// First find a key with longest-matching prefix
 	__attribute__((cleanup(Tns_cleanup)))
-		TnodeStack ns_local;
-	TnodeStack *ns = &ns_local;
+		nstack_t ns_local;
+	nstack_t *ns = &ns_local;
 	Tns_init(ns, tbl);
-	Tbranch bp;
+	branch_t bp;
 	int un_leaf; // first unmatched character in the leaf
 	ERR_RETURN(Tns_find_branch(ns, key, len, &bp, &un_leaf));
 	int un_key = bp.index < len ? key[bp.index] : -256;
-	Trie *t = ns->stack[ns->len-1];
+	node_t *t = ns->stack[ns->len-1];
 	if (bp.flags == 0) { // found exact match
 		if (pval)
 			*pval = &t->leaf.val;
@@ -647,7 +635,7 @@ int Tget_leq(struct Tbl *tbl, const char *key, uint32_t len, value_t **pval) {
 	}
 	// Now we re-do the first "non-matching" step in the trie
 	// but try the previous child if key was less (it may not exist)
-	Tbitmap b = twigbit(t, key, len);
+	bitmap_t b = twigbit(t, key, len);
 	int i = hastwig(t, b)
 		? twigoff(t, b) - (un_key < un_leaf)
 		: twigoff(t, b) - 1 /*twigoff returns successor when !hastwig*/;
@@ -665,17 +653,17 @@ success:
 }
 
 /*! \brief Initialize a new leaf, copying the key, and returning failure code. */
-static int mk_leaf(Trie *leaf, const char *key, uint32_t len, knot_mm_t *mm) {
-	Tkey *k = mm_alloc(mm, sizeof(Tkey) + len);
+static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm) {
+	tkey_t *k = mm_alloc(mm, sizeof(tkey_t) + len);
 	if (unlikely(!k))
 		return KNOT_ENOMEM;
 	k->len = len;
 	memcpy(k->chars, key, len);
-	leaf->leaf = (Tleaf){ .val = NULL, .key = k };
+	leaf->leaf = (leaf_t){ .val = NULL, .key = k };
 	return 0;
 }
 
-value_t* Tget_ins(struct Tbl *tbl, const char *key, uint32_t len) {
+value_t* Tget_ins(struct qp_trie *tbl, const char *key, uint32_t len) {
 	assert(tbl);
 	// First leaf in an empty tbl?
 	if (unlikely(!tbl->weight)) {
@@ -686,30 +674,30 @@ value_t* Tget_ins(struct Tbl *tbl, const char *key, uint32_t len) {
 	}
 	// Find the branching-point
 	__attribute__((cleanup(Tns_cleanup)))
-		TnodeStack ns_local;
-	TnodeStack *ns = &ns_local;
+		nstack_t ns_local;
+	nstack_t *ns = &ns_local;
 	Tns_init(ns, tbl);
-	Tbranch bp; // branch-point: index and flags signifying the longest common prefix
+	branch_t bp; // branch-point: index and flags signifying the longest common prefix
 	int k2; // the first unmatched character in the leaf
 	if (unlikely(Tns_find_branch(ns, key, len, &bp, &k2)))
 		return NULL;
-	Trie *t = ns->stack[ns->len - 1];
+	node_t *t = ns->stack[ns->len - 1];
 	if (bp.flags == 0) // the same key was already present
 		return &t->leaf.val;
-	Trie leaf;
+	node_t leaf;
 	if (unlikely(mk_leaf(&leaf, key, len, &tbl->mm)))
 		return NULL;
 
 	if (isbranch(t) && bp.index == t->branch.index && bp.flags == t->branch.flags) {
 		// The node t needs a new leaf child.
-		Tbitmap b1 = twigbit(t, key, len);
+		bitmap_t b1 = twigbit(t, key, len);
 		assert(!hastwig(t, b1));
 		uint s, m; TWIGOFFMAX(s, m, t, b1); // new child position and original child count
-		Trie *twigs = mm_realloc(&tbl->mm, t->branch.twigs,
-				sizeof(Trie) * (m + 1), sizeof(Trie) * m);
+		node_t *twigs = mm_realloc(&tbl->mm, t->branch.twigs,
+				sizeof(node_t) * (m + 1), sizeof(node_t) * m);
 		if (unlikely(!twigs))
 			goto err_leaf;
-		memmove(twigs+s+1, twigs+s, sizeof(Trie) * (m - s));
+		memmove(twigs+s+1, twigs+s, sizeof(node_t) * (m - s));
 		twigs[s] = leaf;
 		t->branch.twigs = twigs;
 		t->branch.bitmap |= b1;
@@ -720,18 +708,18 @@ value_t* Tget_ins(struct Tbl *tbl, const char *key, uint32_t len) {
 		// Note: it works the same for the case where we insert above root t.
 		#ifndef NDEBUG
 			if (ns->len > 1) {
-				Trie *pt = ns->stack[ns->len-2];
+				node_t *pt = ns->stack[ns->len-2];
 				assert(hastwig(pt, twigbit(pt, key, len)));
 			}
 		#endif
-		Trie *twigs = mm_alloc(&tbl->mm, sizeof(Trie) * 2);
+		node_t *twigs = mm_alloc(&tbl->mm, sizeof(node_t) * 2);
 		if (unlikely(!twigs))
 			goto err_leaf;
-		Trie t2 = *t; // Save before overwriting t.
+		node_t t2 = *t; // Save before overwriting t.
 		t->branch = bp; // copy flags and index
 		t->branch.twigs = twigs;
-		Tbitmap b1 = twigbit(t, key, len);
-		Tbitmap b2 = unlikely(k2 == -256) ? (1<<0) : nibbit(k2, bp.flags);
+		bitmap_t b1 = twigbit(t, key, len);
+		bitmap_t b2 = unlikely(k2 == -256) ? (1<<0) : nibbit(k2, bp.flags);
 		t->branch.bitmap = b1 | b2;
 		*twig(t, twigoff(t, b1)) = leaf;
 		*twig(t, twigoff(t, b2)) = t2;
@@ -744,7 +732,7 @@ err_leaf:
 }
 
 /*! \brief Apply a function to every value_t*, in order; a recursive solution. */
-static int TapplyTrie(Trie *t, int (*f)(value_t*,void*), void* d) {
+static int TapplyTrie(node_t *t, int (*f)(value_t*,void*), void* d) {
 	assert(t);
 	if (!isbranch(t))
 		return f(&t->leaf.val, d);
@@ -753,19 +741,17 @@ static int TapplyTrie(Trie *t, int (*f)(value_t*,void*), void* d) {
 		ERR_RETURN(TapplyTrie(twig(t, i), f, d));
 	return 0;
 }
-int Tapply(struct Tbl *tbl, int (*f)(value_t*,void*), void* d) {
+int Tapply(struct qp_trie *tbl, int (*f)(value_t*,void*), void* d) {
 	assert(tbl && f);
 	if (!tbl->weight)
 		return 0;
 	return TapplyTrie(&tbl->root, f, d);
 }
 
-/* Tit_t is implemented via a simple TnodeStack,
- * always pointing to the current leaf, unless we've finished (i.e. it->len == 0).
- * These are all thin wrappers around static Tns* functions. */
-Tit_t* Tit_begin(struct Tbl *tbl) {
+/* These are all thin wrappers around static Tns* functions. */
+qp_trie_it_t* Tit_begin(struct qp_trie *tbl) {
 	assert(tbl);
-	Tit_t *it = malloc(sizeof(TnodeStack));
+	qp_trie_it_t *it = malloc(sizeof(nstack_t));
 	if (!it)
 		return NULL;
 	Tns_init(it, tbl);
@@ -776,35 +762,35 @@ Tit_t* Tit_begin(struct Tbl *tbl) {
 	}
 	return it;
 }
-int Tit_next(Tit_t *it) {
+int Tit_next(qp_trie_it_t *it) {
 	assert(it && it->len);
 	int err = Tns_next_leaf(it);
 	if (err == 1)
 		it->len = 0; // just finished
 	return err;
 }
-bool Tit_finished(Tit_t *it) {
+bool Tit_finished(qp_trie_it_t *it) {
 	assert(it);
 	return it->len == 0;
 }
-void Tit_free(Tit_t *it) {
+void Tit_free(qp_trie_it_t *it) {
 	if (!it)
 		return;
 	Tns_cleanup(it);
 	free(it);
 }
-const char* Tit_key(Tit_t *it, uint32_t *len) {
+const char* Tit_key(qp_trie_it_t *it, uint32_t *len) {
 	assert(it && it->len);
-	Trie *t = it->stack[it->len-1];
+	node_t *t = it->stack[it->len-1];
 	assert(!isbranch(t));
-	Tkey *key = t->leaf.key;
+	tkey_t *key = t->leaf.key;
 	if (len)
 		*len = key->len;
 	return key->chars;
 }
-value_t* Tit_val(Tit_t *it) {
+value_t* Tit_val(qp_trie_it_t *it) {
 	assert(it && it->len);
-	Trie *t = it->stack[it->len-1];
+	node_t *t = it->stack[it->len-1];
 	assert(!isbranch(t));
 	return &t->leaf.val;
 }
