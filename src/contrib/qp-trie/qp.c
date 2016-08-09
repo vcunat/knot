@@ -4,9 +4,7 @@
 // You may do anything with this. It has no warranty.
 // <http://creativecommons.org/publicdomain/zero/1.0/>
 
-// TODO: cleanup headers
 #include <assert.h>
-#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,14 +13,9 @@
 #include "contrib/macros.h"
 #include "libknot/errcode.h"
 
-
-
-
-
 typedef unsigned char byte;
 typedef unsigned int uint;
-
-typedef uint Tbitmap;
+typedef uint Tbitmap; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive). */
 
 /*! \brief Propagate error codes. */
 #define ERR_RETURN(x) \
@@ -32,27 +25,17 @@ typedef uint Tbitmap;
 			return err_code_; \
 	} while (false)
 
-
+/*!
+ * \brief Count the number of set bits.
+ *
+ * \TODO This implementation may be relatively slow on some HW.
+ */
 static uint popcount(Tbitmap w) {
+	assert((w & ~((1<<17)-1)) == 0); // using the least-important 17 bits
 	uint result = __builtin_popcount(w);
-	assert(result <= 17);
 	return result;
-	// TODO: this implementation may be relatively slow on some HW
 }
 
-/*
-// Parallel popcount of the top and bottom 16 bits in a 32 bit word. This
-// is probably only a win if your CPU is short of registers and/or integer
-// units. NOTE: The caller needs to extract the results by masking with
-// 0x00FF0000 and 0x000000FF for the top and bottom halves.
-static uint popcount16x2(uint w) {
-	w -= (w >> 1) & 0x55555555;
-	w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
-	w = (w + (w >> 4)) & 0x0F0F0F0F;
-	w = w + (w >> 8);
-	return(w);
-}
-*/
 
 // A trie node is two words on 64 bit machines, or three on 32 bit
 // machines. A node can be a leaf or a branch. In a leaf, the value
@@ -140,7 +123,7 @@ static Tbitmap nibbit(byte k, uint flags) {
 	return 1 << (nibble + 1/*because of prefix keys*/);
 }
 
-/*~ \brief Extract a nibble from a key and turn it into a bitmask. */
+/*! \brief Extract a nibble from a key and turn it into a bitmask. */
 static Tbitmap twigbit(Trie *t, const char *key, uint32_t len) {
 	assert(isbranch(t));
 	uint i = t->branch.index;
@@ -151,27 +134,35 @@ static Tbitmap twigbit(Trie *t, const char *key, uint32_t len) {
 	return nibbit((byte)key[i], t->branch.flags);
 }
 
+/*! \brief Test if a branch node has a child indicated by a bitmask. */
 static bool hastwig(Trie *t, Tbitmap bit) {
 	assert(isbranch(t));
 	return t->branch.bitmap & bit;
 }
 
+/*! \brief Compute offset of an existing child in a branch node. */
 static uint twigoff(Trie *t, Tbitmap b) {
 	assert(isbranch(t));
 	return popcount(t->branch.bitmap & (b-1));
 }
 
+/*! \brief Get pointer to a particular child of a branch node. */
 static Trie* twig(Trie *t, uint i) {
 	assert(isbranch(t));
 	return &t->branch.twigs[i];
 }
 
+/*!
+ * \brief For a branch nod, compute offset of a child and child count.
+ *
+ * Having this separate might be meaningful for performance optimization.
+ */
 #define TWIGOFFMAX(off, max, t, b) do {			\
 		off = twigoff(t, b);			\
 		max = popcount(t->branch.bitmap);	\
 	} while(0)
 
-/*! \brief Item comparator from hhash.c */
+/*! \brief Simple string comparator, taken from hhash.c */
 static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_len)
 {
 	int ret = memcmp(k1, k2, MIN(k1_len, k2_len));
@@ -201,7 +192,7 @@ struct Tbl* Tcreate(knot_mm_t *mm) {
 	return trie;
 }
 
-/* Free anything under the trie node, except for the passed pointer itself. */
+/*! \brief Free anything under the trie node, except for the passed pointer itself. */
 static void TfreeTrie(union Trie *trie, knot_mm_t *mm) {
 	if (!isbranch(trie)) {
 		mm_free(mm, trie->leaf.key);
@@ -386,12 +377,13 @@ bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval) {
 	return true;
 }
 
+/*! \brief Stack of nodes, storing a path down a trie. */
 typedef struct TnodeStack {
-	/* Notes:
-	 * - malloc is used directly instead of mm */
-	Trie* *stack;
-	uint32_t len, alen;
-	Trie* stack_init[2000 / sizeof(Trie*)]; // small enough but should fit most use cases
+	Trie* *stack;  /*!< The stack; malloc is used directly instead of mm. */
+	uint32_t len;  /*!< Current length of the stack. */
+	uint32_t alen; /*!< Allocated/available length of the stack. */
+	/*! \brief Initial storage for \a stack; it should fit in most use cases. */
+	Trie* stack_init[2000 / sizeof(Trie*)];
 } TnodeStack;
 
 /*! \brief Create a node stack containing just the root. */
@@ -403,6 +395,7 @@ static void Tns_init(TnodeStack *ns, struct Tbl *tbl) {
 	ns->stack[0] = &tbl->root;
 }
 
+/*! \brief Free inside of the stack, i.e. not the passed pointer itself. */
 static void Tns_cleanup(TnodeStack *ns) {
 	assert(ns && ns->stack);
 	if (likely(ns->stack == ns->stack_init))
@@ -414,6 +407,7 @@ static void Tns_cleanup(TnodeStack *ns) {
 	#endif
 }
 
+/*! \brief Allocate more space for the stack. */
 static int Tns_longer_alloc(TnodeStack *ns) {
 	ns->alen *= 2;
 	size_t new_size = sizeof(TnodeStack) + ns->alen * sizeof(Trie*);
@@ -430,7 +424,7 @@ static int Tns_longer_alloc(TnodeStack *ns) {
 	ns->stack = st;
 	return 0;
 }
-/*! \brief Ensure the node stack can be extended. */
+/*! \brief Ensure the node stack can be extended by one. */
 static inline int Tns_longer(TnodeStack *ns) {
 	// get a longer stack if needed
 	if (likely(ns->len < ns->alen))
@@ -438,7 +432,8 @@ static inline int Tns_longer(TnodeStack *ns) {
 	return Tns_longer_alloc(ns); // hand-split the part suitable for inlining
 }
 
-/*! \brief Find the "branching point" as if searching for a key.
+/*!
+ * \brief Find the "branching point" as if searching for a key.
  *
  *  The whole path to the point is kept on the passed stack;
  *  always at least the root will remain on the top of it.
@@ -520,9 +515,11 @@ success:
 	return 0;
 }
 
-/*! \brief Advance the node stack to the last leaf in the subtree.
+/*!
+ * \brief Advance the node stack to the last leaf in the subtree.
  *
- *		Return 0 or KNOT_ENOMEM. */
+ * \return 0 or KNOT_ENOMEM. 
+ */
 static int Tns_last_leaf(TnodeStack *ns) {
 	assert(ns);
 	do {
@@ -535,9 +532,11 @@ static int Tns_last_leaf(TnodeStack *ns) {
 		ns->stack[ns->len++] = twig(t, lasti);
 	} while (true);
 }
-/*! \brief Advance the node stack to the first leaf in the subtree.
+/*!
+ * \brief Advance the node stack to the first leaf in the subtree.
  *
- *		Return 0 or KNOT_ENOMEM. */
+ * \return 0 or KNOT_ENOMEM.
+ */
 static int Tns_first_leaf(TnodeStack *ns) {
 	assert(ns);
 	do {
@@ -549,10 +548,12 @@ static int Tns_first_leaf(TnodeStack *ns) {
 	} while (true);
 }
 
-/*! \brief Advance the node stack to the leaf that is previous to the current node.
+/*!
+ * \brief Advance the node stack to the leaf that is previous to the current node.
  *
- * Note: prefix leaf under the current node DOES count (if present; perhaps questionable).
- * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM. */
+ * \note Prefix leaf under the current node DOES count (if present; perhaps questionable).
+ * \return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
+ */
 static int Tns_prev_leaf(TnodeStack *ns) {
 	assert(ns && ns->len > 0);
 
@@ -579,10 +580,12 @@ static int Tns_prev_leaf(TnodeStack *ns) {
 		--ns->len;
 	} while (true);
 }
-/*! \brief Advance the node stack to the leaf that is successor to the current node.
+/*!
+ * \brief Advance the node stack to the leaf that is successor to the current node.
  *
- * Note: prefix leaf or anything else under the current node DOES count.
- * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM. */
+ * \note Prefix leaf or anything else under the current node DOES count.
+ * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
+ */
 static int Tns_next_leaf(TnodeStack *ns) {
 	assert(ns && ns->len > 0);
 

@@ -7,11 +7,13 @@
 
 #include "libknot/mm_ctx.h"
 
-/** Native API of QP-tries:
- *	- keys are char strings, not necessarily zero-terminated,
- *	  the structure can only copy the contents
- *	- values are typedef void* value_t, typically you get an ephemeral pointer to it
- *	- admissible key lengths are up to 2^32-1 ATM
+/*!
+ * \file \brief Native API of QP-tries:
+ *
+ * - keys are char strings, not necessarily zero-terminated,
+ *   the structure copies the contents of the passed keys
+ * - values are typedef void* value_t, typically you get an ephemeral pointer to it
+ * - key lengths are limited by 2^32-1 ATM
  */
 
 typedef void* value_t;
@@ -37,7 +39,8 @@ value_t* Tget_try(struct Tbl *tbl, const char *key, uint32_t len);
 /*! \brief Search the trie, inserting NULL value_t on failure. */
 value_t* Tget_ins(struct Tbl *tbl, const char *key, uint32_t len);
 
-/*! \brief Search for less-or-equal element.
+/*!
+ * \brief Search for less-or-equal element.
  *
  * \param pval must be valid; it will be set to NULL if not found or errored.
  * Return 0 for exact match, -1 for previous, 1 for not-found, or KNOT_ENOMEM. */
@@ -46,7 +49,7 @@ int Tget_leq(struct Tbl *tbl, const char *key, uint32_t len, value_t **pval);
 /*! \brief Apply a function to every value_t*, in order. */
 int Tapply(struct Tbl *tbl, int (*f)(value_t*,void*), void* d);
 
-
+/*! \brief TODO: this function isn't (yet ready to be) used. */
 bool Tget_next(struct Tbl *tbl, const char **pkey, uint32_t *plen, value_t **pval);
 
 /*! \brief Remove an item, returning if succeeded.
@@ -55,16 +58,20 @@ bool Tget_next(struct Tbl *tbl, const char **pkey, uint32_t *plen, value_t **pva
 bool Tdel(struct Tbl *tbl, const char *key, uint32_t len, value_t *pval);
 
 
-/*! Creates a new iterator pointing to the first element (if any). */
+/*! \brief Create a new iterator pointing to the first element (if any). */
 Tit_t* Tit_begin(struct Tbl *tbl);
-
+/*!
+ * \brief Advance the iterator to the next element.
+ *
+ * Iteration is in ascending lexicographical order.
+ * In particular, the empty string would be considered as the very first. */
 int Tit_next(Tit_t *it);
-
+/*! \brief Test if the iterator has gone past the last element. */
 bool Tit_finished(Tit_t *it);
-
+/*! \brief Free any resources of the iterator. It's OK to call it on NULL. */
 void Tit_free(Tit_t *it);
-
+/*! \brief Return pointer to the key of the current element. */
 const char* Tit_key(Tit_t *it, uint32_t *plen);
-
+/*! \brief Return pointer to the value of the current element (writable). */
 value_t* Tit_val(Tit_t *it);
 
