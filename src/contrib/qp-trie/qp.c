@@ -17,25 +17,6 @@ typedef unsigned char byte;
 typedef unsigned int uint;
 typedef uint bitmap_t; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive). */
 
-/*! \brief Propagate error codes. */
-#define ERR_RETURN(x) \
-	do { \
-		int err_code_ = x; \
-		if (unlikely(err_code_)) \
-			return err_code_; \
-	} while (false)
-
-/*!
- * \brief Count the number of set bits.
- *
- * \TODO This implementation may be relatively slow on some HW.
- */
-static uint popcount(bitmap_t w) {
-	assert((w & ~((1<<17)-1)) == 0); // using the least-important 17 bits
-	uint result = __builtin_popcount(w);
-	return result;
-}
-
 
 /*! \brief A trie node is either leaf_t or branch_t. */
 typedef union node node_t;
@@ -93,20 +74,42 @@ typedef struct qp_trie {
 	knot_mm_t mm;
 } trie_t;
 
+/*! \brief Propagate error codes. */
+#define ERR_RETURN(x) \
+	do { \
+		int err_code_ = x; \
+		if (unlikely(err_code_)) \
+			return err_code_; \
+	} while (false)
+
+/*!
+ * \brief Count the number of set bits.
+ *
+ * \TODO This implementation may be relatively slow on some HW.
+ */
+static uint popcount(bitmap_t w)
+{
+	assert((w & ~((1<<17)-1)) == 0); // using the least-important 17 bits
+	return __builtin_popcount(w);
+}
+
 /*! \brief Test flags to determine type of this node. */
-static bool isbranch(const node_t *t) {
+static bool isbranch(const node_t *t)
+{
 	return t->branch.flags != 0;
 }
 
 /*! \brief Make a bitmask for testing a branch bitmap. */
-static bitmap_t nibbit(byte k, uint flags) {
+static bitmap_t nibbit(byte k, uint flags)
+{
 	uint shift = (2 - flags) << 2;
 	uint nibble = (k >> shift) & 0xf;
 	return 1 << (nibble + 1/*because of prefix keys*/);
 }
 
 /*! \brief Extract a nibble from a key and turn it into a bitmask. */
-static bitmap_t twigbit(node_t *t, const char *key, uint32_t len) {
+static bitmap_t twigbit(node_t *t, const char *key, uint32_t len)
+{
 	assert(isbranch(t));
 	uint i = t->branch.index;
 
@@ -117,19 +120,22 @@ static bitmap_t twigbit(node_t *t, const char *key, uint32_t len) {
 }
 
 /*! \brief Test if a branch node has a child indicated by a bitmask. */
-static bool hastwig(node_t *t, bitmap_t bit) {
+static bool hastwig(node_t *t, bitmap_t bit)
+{
 	assert(isbranch(t));
 	return t->branch.bitmap & bit;
 }
 
 /*! \brief Compute offset of an existing child in a branch node. */
-static uint twigoff(node_t *t, bitmap_t b) {
+static uint twigoff(node_t *t, bitmap_t b)
+{
 	assert(isbranch(t));
 	return popcount(t->branch.bitmap & (b-1));
 }
 
 /*! \brief Get pointer to a particular child of a branch node. */
-static node_t* twig(node_t *t, uint i) {
+static node_t* twig(node_t *t, uint i)
+{
 	assert(isbranch(t));
 	return &t->branch.twigs[i];
 }
@@ -162,7 +168,8 @@ static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_
 	return 1;
 }
 
-struct qp_trie* Tcreate(knot_mm_t *mm) {
+struct qp_trie* qp_trie_create(knot_mm_t *mm)
+{
 	trie_t *trie = mm_alloc(mm, sizeof(trie_t));
 	if (trie != NULL)
 		trie->root = (node_t) { .leaf = { NULL, NULL } };
@@ -175,36 +182,40 @@ struct qp_trie* Tcreate(knot_mm_t *mm) {
 }
 
 /*! \brief Free anything under the trie node, except for the passed pointer itself. */
-static void TfreeTrie(node_t *trie, knot_mm_t *mm) {
+static void clear_trie(node_t *trie, knot_mm_t *mm)
+{
 	if (!isbranch(trie)) {
 		mm_free(mm, trie->leaf.key);
 	} else {
 		branch_t *b = &trie->branch;
 		int len = popcount(b->bitmap);
 		for (int i = 0; i < len; ++i)
-			TfreeTrie(b->twigs + i, mm);
+			clear_trie(b->twigs + i, mm);
 		mm_free(mm, b->twigs);
 	}
 }
-void Tfree(struct qp_trie *tbl) {
+void qp_trie_free(struct qp_trie *tbl)
+{
 	if (tbl == NULL)
 		return;
 	if (tbl->weight)
-		TfreeTrie(&tbl->root, &tbl->mm);
+		clear_trie(&tbl->root, &tbl->mm);
 	mm_free(&tbl->mm, tbl);
 }
 
-void Tclear(struct qp_trie *tbl) {
+void qp_trie_clear(struct qp_trie *tbl)
+{
 	assert(tbl);
 	if (!tbl->weight)
 		return;
-	TfreeTrie(&tbl->root, &tbl->mm);
+	clear_trie(&tbl->root, &tbl->mm);
 	tbl->root = (node_t) { .leaf = { NULL, NULL } };
 	tbl->weight = 0;
 }
 
 /*! \brief Duplicate everything under the trie node (assumed allocated itself). */
-static int Tdup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), knot_mm_t *mm) {
+static int dup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), knot_mm_t *mm)
+{
 	if (!isbranch(t1)) {
 		tkey_t *key1 = t1->leaf.key;
 		tkey_t *key2 = mm_alloc(mm, sizeof(tkey_t) + key1->len);
@@ -224,16 +235,17 @@ static int Tdup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), kno
 	if (unlikely(!twigs2))
 		return KNOT_ENOMEM;
 	for (int i = 0; i < child_count; ++i) {
-		int err = Tdup_trie(twigs1 + i, twigs2 + i, nval, mm);
+		int err = dup_trie(twigs1 + i, twigs2 + i, nval, mm);
 		if (unlikely(err)) { // error: we need to free already allocated stuff
 			while (--i >= 0)
-				TfreeTrie(twigs2 + i, mm);
+				clear_trie(twigs2 + i, mm);
 			return err;
 		};
 	}
 	return 0;
 }
-trie_t* Tdup(const struct qp_trie *tbl, value_t (*nval)(value_t)) {
+trie_t* qp_trie_dup(const struct qp_trie *tbl, value_t (*nval)(value_t))
+{
 	trie_t *t = mm_alloc(/*const-cast*/(knot_mm_t*) &tbl->mm, sizeof(trie_t));
 	if (unlikely(!t))
 		return NULL;
@@ -243,19 +255,21 @@ trie_t* Tdup(const struct qp_trie *tbl, value_t (*nval)(value_t)) {
 		return t;
 	}
 	t->weight = tbl->weight;
-	if (unlikely(!Tdup_trie(&tbl->root, &t->root, nval, &t->mm))) {
-		Tfree(t);
+	if (unlikely(!dup_trie(&tbl->root, &t->root, nval, &t->mm))) {
+		qp_trie_free(t);
 		return NULL;
 	};
 	return t;
 }
 
 
-size_t Tweight(const struct qp_trie *tbl) {
+size_t qp_trie_weight(const struct qp_trie *tbl)
+{
 	return tbl ? tbl->weight : 0; // for some reason, HAT supports this on NULL
 }
 
-value_t* Tget_try(trie_t *tbl, const char *key, uint32_t len) {
+value_t* qp_trie_get_try(trie_t *tbl, const char *key, uint32_t len)
+{
 	assert(tbl);
 	if (!tbl->weight)
 		return NULL;
@@ -273,7 +287,8 @@ value_t* Tget_try(trie_t *tbl, const char *key, uint32_t len) {
 }
 
 // TODO: review
-static bool next_rec(node_t *t, const char **pkey, uint32_t *plen, value_t **pval) {
+static bool next_rec(node_t *t, const char **pkey, uint32_t *plen, value_t **pval)
+{
 	if(isbranch(t)) {
 		// Recurse to find either this leaf (*pkey != NULL)
 		// or the next one (*pkey == NULL).
@@ -302,7 +317,8 @@ static bool next_rec(node_t *t, const char **pkey, uint32_t *plen, value_t **pva
 }
 
 // TODO: review
-bool Tget_next(trie_t *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
+bool qp_trie_get_next(trie_t *tbl, const char **pkey, uint32_t *plen, value_t **pval)
+{
 	if (tbl == NULL) {
 		*pkey = NULL;
 		*plen = 0;
@@ -311,7 +327,8 @@ bool Tget_next(trie_t *tbl, const char **pkey, uint32_t *plen, value_t **pval) {
 	return next_rec(&tbl->root, pkey, plen, pval);
 }
 
-bool Tdel(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval) {
+bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval)
+{
 	assert(tbl);
 	if (!tbl->weight)
 		return false;
@@ -375,7 +392,8 @@ typedef struct qp_trie_it {
 } nstack_t;
 
 /*! \brief Create a node stack containing just the root. */
-static void Tns_init(nstack_t *ns, struct qp_trie *tbl) {
+static void ns_init(nstack_t *ns, struct qp_trie *tbl)
+{
 	assert(tbl);
 	ns->stack = ns->stack_init;
 	ns->len = 1;
@@ -384,7 +402,8 @@ static void Tns_init(nstack_t *ns, struct qp_trie *tbl) {
 }
 
 /*! \brief Free inside of the stack, i.e. not the passed pointer itself. */
-static void Tns_cleanup(nstack_t *ns) {
+static void ns_cleanup(nstack_t *ns)
+{
 	assert(ns && ns->stack);
 	if (likely(ns->stack == ns->stack_init))
 		return;
@@ -396,7 +415,8 @@ static void Tns_cleanup(nstack_t *ns) {
 }
 
 /*! \brief Allocate more space for the stack. */
-static int Tns_longer_alloc(nstack_t *ns) {
+static int ns_longer_alloc(nstack_t *ns)
+{
 	ns->alen *= 2;
 	size_t new_size = sizeof(nstack_t) + ns->alen * sizeof(node_t*);
 	node_t* *st;
@@ -413,11 +433,12 @@ static int Tns_longer_alloc(nstack_t *ns) {
 	return 0;
 }
 /*! \brief Ensure the node stack can be extended by one. */
-static inline int Tns_longer(nstack_t *ns) {
+static inline int ns_longer(nstack_t *ns)
+{
 	// get a longer stack if needed
 	if (likely(ns->len < ns->alen))
 		return 0;
-	return Tns_longer_alloc(ns); // hand-split the part suitable for inlining
+	return ns_longer_alloc(ns); // hand-split the part suitable for inlining
 }
 
 /*!
@@ -433,13 +454,13 @@ static inline int Tns_longer(nstack_t *ns) {
  *      optionally; end-of-string character has value -256 (that's why it's int).
  *  Return 0 or KNOT_ENOMEM.
  */
-static int Tns_find_branch(nstack_t *ns, const char *key, uint32_t len
+static int ns_find_branch(nstack_t *ns, const char *key, uint32_t len
 		, branch_t *pinfo, int *pfirst)
 {
 	assert(ns && ns->len && pinfo);
 	// First find some leaf with longest matching prefix.
 	while (isbranch(ns->stack[ns->len - 1])) {
-		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(ns_longer(ns));
 		node_t *t = ns->stack[ns->len - 1];
 		__builtin_prefetch(t->branch.twigs);
 		bitmap_t b = twigbit(t, key, len);
@@ -506,12 +527,13 @@ success:
 /*!
  * \brief Advance the node stack to the last leaf in the subtree.
  *
- * \return 0 or KNOT_ENOMEM. 
+ * \return 0 or KNOT_ENOMEM.
  */
-static int Tns_last_leaf(nstack_t *ns) {
+static int ns_last_leaf(nstack_t *ns)
+{
 	assert(ns);
 	do {
-		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(ns_longer(ns));
 		node_t *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
@@ -525,10 +547,11 @@ static int Tns_last_leaf(nstack_t *ns) {
  *
  * \return 0 or KNOT_ENOMEM.
  */
-static int Tns_first_leaf(nstack_t *ns) {
+static int ns_first_leaf(nstack_t *ns)
+{
 	assert(ns);
 	do {
-		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(ns_longer(ns));
 		node_t *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
@@ -542,13 +565,14 @@ static int Tns_first_leaf(nstack_t *ns) {
  * \note Prefix leaf under the current node DOES count (if present; perhaps questionable).
  * \return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
  */
-static int Tns_prev_leaf(nstack_t *ns) {
+static int ns_prev_leaf(nstack_t *ns)
+{
 	assert(ns && ns->len > 0);
 
 	node_t *t = ns->stack[ns->len-1];
 	if (hastwig(t, 1<<0)) { // the prefix leaf
 		t = twig(t, 0);
-		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(ns_longer(ns));
 		ns->stack[ns->len++] = t;
 		return 0;
 	}
@@ -562,7 +586,7 @@ static int Tns_prev_leaf(nstack_t *ns) {
 		assert(pindex >= 0 && pindex <= 16);
 		if (pindex > 0) { // t isn't the first child -> go down the previous one
 			ns->stack[ns->len-1] = twig(p, pindex-1);
-			return Tns_last_leaf(ns);
+			return ns_last_leaf(ns);
 		}
 		// we've got to go up again
 		--ns->len;
@@ -574,12 +598,13 @@ static int Tns_prev_leaf(nstack_t *ns) {
  * \note Prefix leaf or anything else under the current node DOES count.
  * Return 0 on success, 1 on not-found, or possibly KNOT_ENOMEM.
  */
-static int Tns_next_leaf(nstack_t *ns) {
+static int ns_next_leaf(nstack_t *ns)
+{
 	assert(ns && ns->len > 0);
 
 	node_t *t = ns->stack[ns->len-1];
 	if (isbranch(t))
-		return Tns_first_leaf(ns);
+		return ns_first_leaf(ns);
 
 	do {
 		if (ns->len < 2)
@@ -591,26 +616,27 @@ static int Tns_next_leaf(nstack_t *ns) {
 		int pcount = popcount(p->branch.bitmap);
 		if (pindex+1 < pcount) { // t isn't the last child -> go down the next one
 			ns->stack[ns->len-1] = twig(p, pindex+1);
-			return Tns_first_leaf(ns);
+			return ns_first_leaf(ns);
 		}
 		// we've got to go up again
 		--ns->len;
 	} while (true);
 }
 
-int Tget_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t **pval) {
+int qp_trie_get_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t **pval)
+{
 	assert(tbl && pval);
 	*pval = NULL; // so on failure we can just return 1;
 	if (tbl->weight == 0)
 		return 1;
 	// First find a key with longest-matching prefix
-	__attribute__((cleanup(Tns_cleanup)))
+	__attribute__((cleanup(ns_cleanup)))
 		nstack_t ns_local;
 	nstack_t *ns = &ns_local;
-	Tns_init(ns, tbl);
+	ns_init(ns, tbl);
 	branch_t bp;
 	int un_leaf; // first unmatched character in the leaf
-	ERR_RETURN(Tns_find_branch(ns, key, len, &bp, &un_leaf));
+	ERR_RETURN(ns_find_branch(ns, key, len, &bp, &un_leaf));
 	int un_key = bp.index < len ? key[bp.index] : -256;
 	node_t *t = ns->stack[ns->len-1];
 	if (bp.flags == 0) { // found exact match
@@ -627,7 +653,7 @@ int Tget_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t **pval)
 			// root was unmatched already
 			if (un_key < un_leaf)
 				return 1;
-			ERR_RETURN(Tns_last_leaf(ns));
+			ERR_RETURN(ns_last_leaf(ns));
 			goto success;
 		}
 		--ns->len;
@@ -640,11 +666,11 @@ int Tget_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t **pval)
 		? twigoff(t, b) - (un_key < un_leaf)
 		: twigoff(t, b) - 1 /*twigoff returns successor when !hastwig*/;
 	if (i >= 0) {
-		ERR_RETURN(Tns_longer(ns));
+		ERR_RETURN(ns_longer(ns));
 		ns->stack[ns->len++] = twig(t, i);
-		ERR_RETURN(Tns_last_leaf(ns));
+		ERR_RETURN(ns_last_leaf(ns));
 	} else {
-		ERR_RETURN(Tns_prev_leaf(ns)); // KNOT_ENOMEM or 1 for no-leq
+		ERR_RETURN(ns_prev_leaf(ns)); // KNOT_ENOMEM or 1 for no-leq
 	}
 success:
 	assert(!isbranch(ns->stack[ns->len-1]));
@@ -653,7 +679,8 @@ success:
 }
 
 /*! \brief Initialize a new leaf, copying the key, and returning failure code. */
-static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm) {
+static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm)
+{
 	tkey_t *k = mm_alloc(mm, sizeof(tkey_t) + len);
 	if (unlikely(!k))
 		return KNOT_ENOMEM;
@@ -663,7 +690,8 @@ static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm) {
 	return 0;
 }
 
-value_t* Tget_ins(struct qp_trie *tbl, const char *key, uint32_t len) {
+value_t* qp_trie_get_ins(struct qp_trie *tbl, const char *key, uint32_t len)
+{
 	assert(tbl);
 	// First leaf in an empty tbl?
 	if (unlikely(!tbl->weight)) {
@@ -673,13 +701,13 @@ value_t* Tget_ins(struct qp_trie *tbl, const char *key, uint32_t len) {
 		return &tbl->root.leaf.val;
 	}
 	// Find the branching-point
-	__attribute__((cleanup(Tns_cleanup)))
+	__attribute__((cleanup(ns_cleanup)))
 		nstack_t ns_local;
 	nstack_t *ns = &ns_local;
-	Tns_init(ns, tbl);
+	ns_init(ns, tbl);
 	branch_t bp; // branch-point: index and flags signifying the longest common prefix
 	int k2; // the first unmatched character in the leaf
-	if (unlikely(Tns_find_branch(ns, key, len, &bp, &k2)))
+	if (unlikely(ns_find_branch(ns, key, len, &bp, &k2)))
 		return NULL;
 	node_t *t = ns->stack[ns->len - 1];
 	if (bp.flags == 0) // the same key was already present
@@ -732,54 +760,61 @@ err_leaf:
 }
 
 /*! \brief Apply a function to every value_t*, in order; a recursive solution. */
-static int TapplyTrie(node_t *t, int (*f)(value_t*,void*), void* d) {
+static int apply_trie(node_t *t, int (*f)(value_t*,void*), void* d)
+{
 	assert(t);
 	if (!isbranch(t))
 		return f(&t->leaf.val, d);
 	int child_count = popcount(t->branch.bitmap);
 	for (int i = 0; i < child_count; ++i)
-		ERR_RETURN(TapplyTrie(twig(t, i), f, d));
+		ERR_RETURN(apply_trie(twig(t, i), f, d));
 	return 0;
 }
-int Tapply(struct qp_trie *tbl, int (*f)(value_t*,void*), void* d) {
+int qp_trie_apply(struct qp_trie *tbl, int (*f)(value_t*,void*), void* d)
+{
 	assert(tbl && f);
 	if (!tbl->weight)
 		return 0;
-	return TapplyTrie(&tbl->root, f, d);
+	return apply_trie(&tbl->root, f, d);
 }
 
 /* These are all thin wrappers around static Tns* functions. */
-qp_trie_it_t* Tit_begin(struct qp_trie *tbl) {
+qp_trie_it_t* qp_trie_it_begin(struct qp_trie *tbl)
+{
 	assert(tbl);
 	qp_trie_it_t *it = malloc(sizeof(nstack_t));
 	if (!it)
 		return NULL;
-	Tns_init(it, tbl);
-	if (Tns_first_leaf(it)) {
-		Tns_cleanup(it);
+	ns_init(it, tbl);
+	if (ns_first_leaf(it)) {
+		ns_cleanup(it);
 		free(it);
 		return NULL;
 	}
 	return it;
 }
-int Tit_next(qp_trie_it_t *it) {
+int qp_trie_it_next(qp_trie_it_t *it)
+{
 	assert(it && it->len);
-	int err = Tns_next_leaf(it);
+	int err = ns_next_leaf(it);
 	if (err == 1)
 		it->len = 0; // just finished
 	return err;
 }
-bool Tit_finished(qp_trie_it_t *it) {
+bool qp_trie_it_finished(qp_trie_it_t *it)
+{
 	assert(it);
 	return it->len == 0;
 }
-void Tit_free(qp_trie_it_t *it) {
+void qp_trie_it_free(qp_trie_it_t *it)
+{
 	if (!it)
 		return;
-	Tns_cleanup(it);
+	ns_cleanup(it);
 	free(it);
 }
-const char* Tit_key(qp_trie_it_t *it, uint32_t *len) {
+const char* qp_trie_it_key(qp_trie_it_t *it, uint32_t *len)
+{
 	assert(it && it->len);
 	node_t *t = it->stack[it->len-1];
 	assert(!isbranch(t));
@@ -788,7 +823,8 @@ const char* Tit_key(qp_trie_it_t *it, uint32_t *len) {
 		*len = key->len;
 	return key->chars;
 }
-value_t* Tit_val(qp_trie_it_t *it) {
+value_t* qp_trie_it_val(qp_trie_it_t *it)
+{
 	assert(it && it->len);
 	node_t *t = it->stack[it->len-1];
 	assert(!isbranch(t));
