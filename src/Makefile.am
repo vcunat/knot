@@ -200,6 +200,8 @@ endif
 
 # static: utilities shared
 libknotus_la_SOURCES =				\
+	utils/common/cert.c			\
+	utils/common/cert.h			\
 	utils/common/exec.c			\
 	utils/common/exec.h			\
 	utils/common/hex.c			\
@@ -216,10 +218,12 @@ libknotus_la_SOURCES =				\
 	utils/common/resolv.h			\
 	utils/common/sign.c			\
 	utils/common/sign.h			\
+	utils/common/tls.c			\
+	utils/common/tls.h			\
 	utils/common/token.c			\
 	utils/common/token.h
 
-libknotus_la_CPPFLAGS = $(AM_CPPFLAGS) $(libidn_CFLAGS) $(libedit_CFLAGS)
+libknotus_la_CPPFLAGS = $(AM_CPPFLAGS) $(libidn_CFLAGS) $(libedit_CFLAGS) $(gnutls_CFLAGS)
 libknotus_la_LDFLAGS = $(AM_LDFLAGS) $(libidn_LIBS)
 libknotus_la_LIBADD = libcontrib.la libknot.la
 
@@ -512,21 +516,24 @@ knsupdate_SOURCES =				\
 	utils/knsupdate/knsupdate_params.h
 
 # bin programs
-kdig_LDADD       = $(libidn_LIBS) libknotus.la
-khost_LDADD      = $(libidn_LIBS) libknotus.la
-knsupdate_LDADD  = zscanner/libzscanner.la libknotus.la
+kdig_CPPFLAGS       = $(AM_CPPFLAGS) $(gnutls_CFLAGS)
+kdig_LDADD          = $(libidn_LIBS) libknotus.la
+khost_CPPFLAGS      = $(AM_CPPFLAGS) $(gnutls_CFLAGS)
+khost_LDADD         = $(libidn_LIBS) libknotus.la
+knsupdate_CPPFLAGS  = $(AM_CPPFLAGS) $(gnutls_CFLAGS)
+knsupdate_LDADD     = zscanner/libzscanner.la libknotus.la
 knsec3hash_CPPFLAGS = $(AM_CPPFLAGS) -I$(srcdir)/dnssec/lib/dnssec -I$(srcdir)/dnssec
-knsec3hash_LDADD = dnssec/libdnssec.la dnssec/libshared.la
+knsec3hash_LDADD    = dnssec/libdnssec.la dnssec/libshared.la
 
 #######################################
 # Optional Knot DNS Utilities modules #
 #######################################
 
 if HAVE_DNSTAP
-kdig_LDADD         += $(DNSTAP_LIBS) contrib/dnstap/libdnstap.la
-khost_LDADD        += $(DNSTAP_LIBS) contrib/dnstap/libdnstap.la
-kdig_CFLAGS = $(AM_CFLAGS) $(DNSTAP_CFLAGS)
-khost_CFLAGS = $(AM_CFLAGS) $(DNSTAP_CFLAGS)
+kdig_LDADD     += $(DNSTAP_LIBS) contrib/dnstap/libdnstap.la
+khost_LDADD    += $(DNSTAP_LIBS) contrib/dnstap/libdnstap.la
+kdig_CPPFLAGS  += $(DNSTAP_CFLAGS)
+khost_CPPFLAGS += $(DNSTAP_CFLAGS)
 endif # HAVE_DNSTAP
 
 if HAVE_ROSEDB
