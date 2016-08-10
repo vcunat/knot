@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
 	}
 	ok(passed, "hattrie: find lesser or equal for all keys");
 
-#if 0 // unsupported operation ATM
+#if !TRIE_USE_QP // unsupported operation ATM
 	/* Next lookup. */
 	passed = true;
 	for (unsigned i = 0; i < key_count - 1 && passed; ++i) {

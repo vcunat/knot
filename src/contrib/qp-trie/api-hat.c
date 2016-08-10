@@ -1,16 +1,9 @@
 
-#include <assert.h>
-#include <stdlib.h>
-
-#include <stdio.h> // XXX: just debug
-
 typedef struct qp_trie hattrie_t; // define again, to be sure we didn't mix it up
-#include "contrib/hat-trie/hat-api.h"
+#include "contrib/hat-trie/hat-trie.h"
 
 #include "contrib/qp-trie/qp.h"
 #include "contrib/macros.h"
-
-// FIXME: unimplemented stuff with abort()
 
 
 hattrie_t* hattrie_create(void)
@@ -62,13 +55,6 @@ value_t* hattrie_get(hattrie_t *trie, const char *key, size_t len)
     return qp_trie_get_ins(trie, key, len);
 }
 
-int hattrie_find_next(hattrie_t *trie, const char *key, size_t len, value_t **dst)
-{
-    fprintf(stderr, "hattrie_find_next\n");
-    abort(); // it's dead code, except for tests
-    // beware: we update local parameters key and len in-place
-    //return qp_trie_get_next(trie, &key, &len, dst) ? 1 : 0;
-}
 int hattrie_find_leq(hattrie_t *trie, const char *key, size_t len, value_t **dst)
 {
     return qp_trie_get_leq(trie, key, len, dst);

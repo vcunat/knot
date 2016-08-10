@@ -337,47 +337,6 @@ value_t* qp_trie_get_try(trie_t *tbl, const char *key, uint32_t len)
 	return &t->leaf.val;
 }
 
-// TODO: review
-static bool next_rec(node_t *t, const char **pkey, uint32_t *plen, value_t **pval)
-{
-	if(isbranch(t)) {
-		// Recurse to find either this leaf (*pkey != NULL)
-		// or the next one (*pkey == NULL).
-		bitmap_t b = twigbit(t, *pkey, *plen);
-		uint s, m; TWIGOFFMAX(s, m, t, b);
-		for(; s < m; s++)
-			if(next_rec(twig(t, s), pkey, plen, pval))
-				return(true);
-		return(false);
-	}
-	// We have found the next leaf.
-	if(*pkey == NULL) {
-		*pkey = t->leaf.key->chars;
-		*plen = t->leaf.key->len;
-		*pval = &t->leaf.val;
-		return(true);
-	}
-	// We have found this leaf, so start looking for the next one.
-	if(key_cmp(*pkey, *plen, t->leaf.key->chars, t->leaf.key->len) == 0) {
-		*pkey = NULL;
-		*plen = 0;
-		return(false);
-	}
-	// No match.
-	return(false);
-}
-
-// TODO: review
-bool qp_trie_get_next(trie_t *tbl, const char **pkey, uint32_t *plen, value_t **pval)
-{
-	if (tbl == NULL) {
-		*pkey = NULL;
-		*plen = 0;
-		return(NULL);
-	}
-	return next_rec(&tbl->root, pkey, plen, pval);
-}
-
 bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval)
 {
 	assert(tbl);

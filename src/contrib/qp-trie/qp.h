@@ -53,9 +53,6 @@ int qp_trie_get_leq(struct qp_trie *tbl, const char *key, uint32_t len, value_t 
 /*! \brief Apply a function to every value_t*, in order. */
 int qp_trie_apply(struct qp_trie *tbl, int (*f)(value_t*,void*), void* d);
 
-/*! \brief TODO: this function isn't (yet ready to be) used. */
-bool qp_trie_get_next(struct qp_trie *tbl, const char **pkey, uint32_t *plen, value_t **pval);
-
 /*!
  * \brief Remove an item, returning if succeeded.
  *
