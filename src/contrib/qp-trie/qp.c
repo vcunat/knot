@@ -13,6 +13,29 @@
 #include "contrib/macros.h"
 #include "libknot/errcode.h"
 
+
+#if defined(__i386) || defined(__x86_64) || defined(_M_IX86) \
+	|| (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN) \
+		&& __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+
+	/*!
+	 * \brief Use a pointer alignment hack to save memory.
+	 *
+	 * When on, isbranch() relies on the fact that in leaf_t the first pointer
+	 * is aligned on multiple of 4 bytes and that the flags bitfield is
+	 * overlaid over the lowest two bits of that pointer.
+	 * Neither is really guaranteed by the C standards; the second part should
+	 * be OK with x86_64 ABI and most likely any other little-endian platform.
+	 * It would be possible to manipulate the right bits portably, but it would
+	 * complicate the code nontrivially. C++ doesn't even guarantee type-punning.
+	 * In debug mode we check this works OK when creating a new trie instance.
+	 */
+	#define FLAGS_HACK 1
+#else
+	#define FLAGS_HACK 0
+#endif
+
+
 typedef unsigned char byte;
 typedef unsigned int uint;
 typedef uint bitmap_t; /*! Bit-maps, using the range of 1<<0 to 1<<16 (inclusive). */
@@ -25,6 +48,9 @@ typedef union node node_t;
 typedef struct tkey tkey_t;
 /*! \brief Leaf of trie. */
 typedef struct leaf {
+	#if !FLAGS_HACK
+		byte flags;
+	#endif
 	tkey_t *key; /*!< The pointer must be aligned to 4-byte multiples! */
 	value_t val;
 } leaf_t;
@@ -46,20 +72,21 @@ struct tkey {
  *   (Consequently, the skipped parts of key have to be validated in a leaf.)
  * - The bitmap indicates which subtries are present.  The present child nodes
  *   are stored in the twigs array (with no holes between them).
+ * - To simplify storing keys that are prefixes of each other, the end-of-string
+ *   position is treated as another nibble value, ordered before all others.
+ *   That affects the bitmap and twigs fields.
  * \note The branch nodes are never allocated individually, but they are
  *   always part of either the root node or the twigs array of the parent.
- * \TODO other than x86_64 ABI might be broken.
- *   The order of bit fields within an allocation unit is undefined by standard!
- *   http://en.cppreference.com/w/c/language/bit_field
- *   but it's in ABI
- *   https://gcc.gnu.org/onlinedocs/gcc-6.1.0/gcc/Structures-unions-enumerations-and-bit-fields-implementation.html#Structures-unions-enumerations-and-bit-fields-implementation
- *   http://www.x86-64.org/documentation/abi.pdf (pg. 13,14)
  */
 typedef struct branch {
-	uint64_t
-		flags : 2,
-		index : 45,
-		bitmap : 17; /*!< The first bitmap bit is for end-of-string child. */
+	#if FLAGS_HACK
+		uint32_t flags : 2,
+			bitmap : 17; /*!< The first bitmap bit is for end-of-string child. */
+	#else
+		byte flags;
+		uint32_t bitmap;
+	#endif
+	uint32_t index;
 	node_t *twigs;
 } branch_t;
 
@@ -69,10 +96,33 @@ union node {
 };
 
 typedef struct qp_trie {
-	node_t root; // undefined when weight == 0, preferably all zeroed
+	node_t root; // undefined when weight == 0, see empty_root()
 	size_t weight;
 	knot_mm_t mm;
 } trie_t;
+
+/*! \brief Make the root node empty (debug-only). */
+static inline void empty_root(node_t *root) {
+#ifndef NDEBUG
+	*root = (node_t){ .leaf = {
+		#if !FLAGS_HACK
+			.flags = 0,
+		#endif
+		.key = NULL,
+		.val = NULL
+	} };
+#endif
+}
+
+/*! \brief Check that unportable code works OK (debug-only). */
+static void assert_portability(void) {
+#if FLAGS_HACK
+	assert(
+		((union node){ .leaf = { .key = ((void *)NULL)+1, .val = NULL } }
+			).branch.flags == 1
+	);
+#endif
+}
 
 /*! \brief Propagate error codes. */
 #define ERR_RETURN(x) \
@@ -170,9 +220,10 @@ static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_
 
 struct qp_trie* qp_trie_create(knot_mm_t *mm)
 {
+	assert_portability();
 	trie_t *trie = mm_alloc(mm, sizeof(trie_t));
 	if (trie != NULL)
-		trie->root = (node_t) { .leaf = { NULL, NULL } };
+		empty_root(&trie->root);
 		trie->weight = 0;
 		if (mm != NULL)
 			trie->mm = *mm;
@@ -209,7 +260,7 @@ void qp_trie_clear(struct qp_trie *tbl)
 	if (!tbl->weight)
 		return;
 	clear_trie(&tbl->root, &tbl->mm);
-	tbl->root = (node_t) { .leaf = { NULL, NULL } };
+	empty_root(&tbl->root);
 	tbl->weight = 0;
 }
 
@@ -351,7 +402,7 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 	--tbl->weight;
 	if (unlikely(!p)) { // whole trie was a single leaf
 		assert(tbl->weight == 0);
-		tbl->root = (node_t) { .leaf = { NULL, NULL } };
+		empty_root(&tbl->root);
 		return true;
 	}
 	// remove leaf t as child of p
@@ -682,11 +733,20 @@ success:
 static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm)
 {
 	tkey_t *k = mm_alloc(mm, sizeof(tkey_t) + len);
+	#if FLAGS_HACK
+		assert(((uintptr_t)k) % 4 == 0); // we need an aligned pointer
+	#endif
 	if (unlikely(!k))
 		return KNOT_ENOMEM;
 	k->len = len;
 	memcpy(k->chars, key, len);
-	leaf->leaf = (leaf_t){ .val = NULL, .key = k };
+	leaf->leaf = (leaf_t){
+		#if !FLAGS_HACK
+			.flags = 0,
+		#endif
+		.val = NULL,
+		.key = k
+	};
 	return 0;
 }
 
