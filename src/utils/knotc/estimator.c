@@ -134,7 +134,7 @@ void estimator_free(void *p)
 	free(p);
 }
 
-static int get_htable_size(void *t, void *d)
+static int __attribute__((__unused__)) get_htable_size(void *t, void *d)
 {
 	hhash_t *table = (hhash_t *)t;
 	size_t *size = (size_t *)d;
@@ -163,7 +163,9 @@ size_t estimator_trie_htable_memsize(hattrie_t *table)
 	 * (Even for large zones, space taken by trie itself is very small)
 	 */
 	size_t size = 0;
+	#if !TRIE_USE_QP // QP allocate all non-ephemeral memory through the context
 	hattrie_apply_rev_ahtable(table, get_htable_size, &size);
+	#endif
 	return size;
 }
 

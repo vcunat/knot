@@ -37,7 +37,6 @@ typedef struct qp_trie hattrie_t;
 typedef struct qp_trie_it hattrie_iter_t;
 // dummy
 #define TRIE_BUCKET_SIZE (-1)
-// FIXME: ../../../utils/knotc/estimator.c
 #include "contrib/hhash.h"
 
 #else

@@ -51,11 +51,6 @@ int hattrie_apply_rev(hattrie_t *trie, int (*f)(value_t*,void*), void* d)
 {
     return qp_trie_apply(trie, f, d);
 }
-int hattrie_apply_rev_ahtable(hattrie_t *trie, int (*f)(void*,void*), void* d)
-{
-    fprintf(stderr, "hattrie_apply_rev_ahtable\n");
-    abort();
-}
 
 
 value_t* hattrie_tryget(hattrie_t *trie, const char *key, size_t len)

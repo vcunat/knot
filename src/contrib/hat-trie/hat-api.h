@@ -32,8 +32,10 @@ void hattrie_build_index (hattrie_t*);
 
 /** Apply a function to each node, in order. */
 int hattrie_apply_rev (hattrie_t*, int (*f)(value_t*,void*), void* d);
+#if !TRIE_USE_QP // not meaningful for QP
 /** Apply a function to each hash-table node (!), in order. */
 int hattrie_apply_rev_ahtable(hattrie_t* T, int (*f)(void*,void*), void* d);
+#endif
 
 /** Find the given key in the trie, inserting it if it does not exist, and
  * returning a pointer to its key.
