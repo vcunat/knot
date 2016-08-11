@@ -150,7 +150,7 @@ static void assert_portability(void) {
  *
  * \TODO This implementation may be relatively slow on some HW.
  */
-static uint popcount(bitmap_t w)
+static uint bitmap_weight(bitmap_t w)
 {
 	assert((w & ~((1<<17)-1)) == 0); // using the least-important 17 bits
 	return __builtin_popcount(w);
@@ -193,7 +193,7 @@ static bool hastwig(node_t *t, bitmap_t bit)
 static uint twigoff(node_t *t, bitmap_t b)
 {
 	assert(isbranch(t));
-	return popcount(t->branch.bitmap & (b-1));
+	return bitmap_weight(t->branch.bitmap & (b-1));
 }
 
 /*! \brief Get pointer to a particular child of a branch node. */
@@ -210,7 +210,7 @@ static node_t* twig(node_t *t, uint i)
  */
 #define TWIGOFFMAX(off, max, t, b) do {			\
 		off = twigoff(t, b);			\
-		max = popcount(t->branch.bitmap);	\
+		max = bitmap_weight(t->branch.bitmap);	\
 	} while(0)
 
 /*! \brief Simple string comparator, taken from hhash.c */
@@ -252,7 +252,7 @@ static void clear_trie(node_t *trie, knot_mm_t *mm)
 		mm_free(mm, trie->leaf.key);
 	} else {
 		branch_t *b = &trie->branch;
-		int len = popcount(b->bitmap);
+		int len = bitmap_weight(b->bitmap);
 		for (int i = 0; i < len; ++i)
 			clear_trie(b->twigs + i, mm);
 		mm_free(mm, b->twigs);
@@ -292,7 +292,7 @@ static int dup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), knot
 		return 0;
 	}
 	memcpy(t2, t1, sizeof(branch_t)); // flags etc.; will rewrite the pointer
-	int child_count = popcount(t1->branch.bitmap);
+	int child_count = bitmap_weight(t1->branch.bitmap);
 	t2->branch.twigs = mm_alloc(mm, sizeof(node_t) * child_count);
 	node_t *twigs1 = t1->branch.twigs;
 	node_t *twigs2 = t2->branch.twigs;
@@ -379,7 +379,7 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 	}
 	// remove leaf t as child of p
 	int ci = t - p->twigs, // child index via pointer arithmetic
-	    cc = popcount(p->bitmap); // child count
+	    cc = bitmap_weight(p->bitmap); // child count
 	assert(ci >= 0 && ci < cc);
 
 	if (cc == 2) { // collapse binary node p: move the other child to this node
@@ -560,7 +560,7 @@ static int ns_last_leaf(nstack_t *ns)
 		node_t *t = ns->stack[ns->len - 1];
 		if (!isbranch(t))
 			return 0;
-		int lasti = popcount(t->branch.bitmap) - 1;
+		int lasti = bitmap_weight(t->branch.bitmap) - 1;
 		assert(lasti >= 0);
 		ns->stack[ns->len++] = twig(t, lasti);
 	} while (true);
@@ -636,7 +636,7 @@ static int ns_next_leaf(nstack_t *ns)
 		node_t *p = ns->stack[ns->len-2];
 		int pindex = t - p->branch.twigs; // index in parent via pointer arithmetic
 		assert(pindex >= 0 && pindex <= 16);
-		int pcount = popcount(p->branch.bitmap);
+		int pcount = bitmap_weight(p->branch.bitmap);
 		if (pindex+1 < pcount) { // t isn't the last child -> go down the next one
 			ns->stack[ns->len-1] = twig(p, pindex+1);
 			return ns_first_leaf(ns);
@@ -797,7 +797,7 @@ static int apply_trie(node_t *t, int (*f)(value_t*,void*), void* d)
 	assert(t);
 	if (!isbranch(t))
 		return f(&t->leaf.val, d);
-	int child_count = popcount(t->branch.bitmap);
+	int child_count = bitmap_weight(t->branch.bitmap);
 	for (int i = 0; i < child_count; ++i)
 		ERR_RETURN(apply_trie(twig(t, i), f, d));
 	return 0;
