@@ -300,7 +300,7 @@ class Server(object):
                     errcount += int(line[err_line.end():].lstrip(). \
                                     split(" ")[0].replace(",", ""))
 
-                    if lost > 0 or reachable > 0 or errcount > 0:
+                    if lost > 0 or errcount > 0:
                         set_err("VALGRIND")
                         detail_log("%s memcheck: lost(%i B), reachable(%i B), " \
                                    "errcount(%i)" \
