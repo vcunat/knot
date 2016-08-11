@@ -20,8 +20,10 @@
 #include <stddef.h>
 
 #include "libknot/mm_ctx.h"
+#include "contrib/hhash.h" /* only for value_t */
 
-typedef void* value_t;
+/* typedef void* value_t; // is taken from "contrib/hhash.h" */
+
 /* API notes:
  *  - any key passed shouldn't be kept by the structure (it should make a deep copy)
  */

@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "libknot/mm_ctx.h"
+#include "contrib/hhash.h" /* only for value_t */
 
 /*!
  * \file \brief Native API of QP-tries:
@@ -33,11 +34,9 @@
 
 /*! Opaque structure holding a QP-trie. */
 struct qp_trie;
-/*! Type of the values to be stored by the trie. */
-typedef void* value_t;
 /*! Opaque type for holding a QP-trie iterator. */
 typedef struct qp_trie_it qp_trie_it_t;
-
+/* typedef void* value_t; // is taken from "contrib/hhash.h" */
 
 /*! \brief Create a trie instance. */
 struct qp_trie* qp_trie_create(knot_mm_t *mm);

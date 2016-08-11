@@ -14,7 +14,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-typedef struct qp_trie hattrie_t; // define again, to be sure we didn't mix it up
 #include "contrib/hat-trie/hat-trie.h"
 
 #include "contrib/qp-trie/qp.h"
