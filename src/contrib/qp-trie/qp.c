@@ -117,12 +117,11 @@ typedef struct qp_trie {
 /*! \brief Make the root node empty (debug-only). */
 static inline void empty_root(node_t *root) {
 #ifndef NDEBUG
-	*root = (node_t){ .leaf = {
-		#if !FLAGS_HACK
-			.flags = 0,
-		#endif
-		.key = NULL,
-		.val = NULL
+	*root = (node_t){ .branch = {
+		.flags = 3, // invalid value that fits
+		.bitmap = 0,
+		.index = -1,
+		.twigs = NULL
 	} };
 #endif
 }
@@ -159,7 +158,9 @@ static uint bitmap_weight(bitmap_t w)
 /*! \brief Test flags to determine type of this node. */
 static bool isbranch(const node_t *t)
 {
-	return t->branch.flags != 0;
+	uint f = t->branch.flags;
+	assert(f <= 2);
+	return f != 0;
 }
 
 /*! \brief Make a bitmask for testing a branch bitmap. */
@@ -415,14 +416,18 @@ typedef struct qp_trie_it {
 	node_t* stack_init[2000 / sizeof(node_t*)];
 } nstack_t;
 
-/*! \brief Create a node stack containing just the root. */
+/*! \brief Create a node stack containing just the root (or empty). */
 static void ns_init(nstack_t *ns, struct qp_trie *tbl)
 {
 	assert(tbl);
 	ns->stack = ns->stack_init;
-	ns->len = 1;
 	ns->alen = sizeof(ns->stack_init) / sizeof(ns->stack_init[0]);
-	ns->stack[0] = &tbl->root;
+	if (tbl->weight) {
+		ns->len = 1;
+		ns->stack[0] = &tbl->root;
+	} else {
+		ns->len = 0;
+	}
 }
 
 /*! \brief Free inside of the stack, i.e. not the passed pointer itself. */
@@ -573,7 +578,7 @@ static int ns_last_leaf(nstack_t *ns)
  */
 static int ns_first_leaf(nstack_t *ns)
 {
-	assert(ns);
+	assert(ns && ns->len);
 	do {
 		ERR_RETURN(ns_longer(ns));
 		node_t *t = ns->stack[ns->len - 1];
@@ -819,6 +824,8 @@ qp_trie_it_t* qp_trie_it_begin(struct qp_trie *tbl)
 	if (!it)
 		return NULL;
 	ns_init(it, tbl);
+	if (it->len == 0) // empty tbl
+		return it;
 	if (ns_first_leaf(it)) {
 		ns_cleanup(it);
 		free(it);

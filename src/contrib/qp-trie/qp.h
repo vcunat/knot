@@ -70,7 +70,7 @@ int qp_trie_apply(struct qp_trie *tbl, int (*f)(value_t*,void*), void* d);
 /*!
  * \brief Remove an item, returning if succeeded.
  *
- * If val!=NULL and deletion succeeded, the deleted value is set. */
+ * If pval!=NULL and deletion succeeded, the deleted value is set. */
 bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval);
 
 
