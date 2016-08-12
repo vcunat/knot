@@ -352,11 +352,11 @@ value_t* qp_trie_get_try(trie_t *tbl, const char *key, uint32_t len)
 	return &t->leaf.val;
 }
 
-bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval)
+int qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pval)
 {
 	assert(tbl);
 	if (!tbl->weight)
-		return false;
+		return 1;
 	node_t *t = &tbl->root; // current and parent node
 	branch_t *p = NULL;
 	bitmap_t b = 0;
@@ -364,12 +364,12 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 		__builtin_prefetch(t->branch.twigs);
 		b = twigbit(t, key, len);
 		if (!hastwig(t, b))
-			return false;
+			return 1;
 		p = &t->branch;
 		t = twig(t, twigoff(t, b));
 	}
 	if (key_cmp(key, len, t->leaf.key->chars, t->leaf.key->len) != 0)
-		return false;
+		return 1;
 	mm_free(&tbl->mm, t->leaf.key);
 	if (pval != NULL)
 		*pval = t->leaf.val; // we return value_t directly when deleting
@@ -377,7 +377,7 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 	if (unlikely(!p)) { // whole trie was a single leaf
 		assert(tbl->weight == 0);
 		empty_root(&tbl->root);
-		return true;
+		return 0;
 	}
 	// remove leaf t as child of p
 	int ci = t - p->twigs, // child index via pointer arithmetic
@@ -388,7 +388,7 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 		node_t *twigs = p->twigs;
 		(*(node_t*)p) = twigs[1-ci]; // it might be a leaf or branch
 		mm_free(&tbl->mm, twigs);
-		return true;
+		return 0;
 	}
 	memmove(p->twigs+ci, p->twigs+ci+1, sizeof(node_t) * (cc - ci - 1));
 	p->bitmap &= ~b;
@@ -398,7 +398,7 @@ bool qp_trie_del(struct qp_trie *tbl, const char *key, uint32_t len, value_t *pv
 		p->twigs = twigs;
 		/* We can ignore mm_realloc failure, only beware that next time
 		 * the prev_size passed to it wouldn't be correct; TODO? */
-	return true;
+	return 0;
 }
 
 /*!

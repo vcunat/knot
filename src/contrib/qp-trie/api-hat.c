@@ -76,7 +76,8 @@ int hattrie_find_leq(hattrie_t *trie, const char *key, size_t len, value_t **dst
 
 int hattrie_del(hattrie_t *trie, const char* key, size_t len)
 {
-    return qp_trie_del(trie, key, len, NULL) ? 0 : -1;
+    // QP has 1 as error instead of -1, to be consistent with qp_trie_get_leq
+    return - qp_trie_del(trie, key, len, NULL);
 }
 
 
