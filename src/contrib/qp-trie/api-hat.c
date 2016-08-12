@@ -84,7 +84,7 @@ int hattrie_del(hattrie_t *trie, const char* key, size_t len)
 hattrie_iter_t* hattrie_iter_begin(const hattrie_t *trie, bool sorted)
 {
 	UNUSED(sorted); // iteration over QP is always sorted ATM
-	return qp_trie_it_begin(/*const-cast*/(hattrie_t*) trie);
+	return qp_trie_it_begin(/*const-cast*/(hattrie_t*)trie);
 }
 void hattrie_iter_next(hattrie_iter_t *it)
 {

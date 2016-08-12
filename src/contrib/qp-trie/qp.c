@@ -312,7 +312,7 @@ static int dup_trie(const node_t *t1, node_t *t2, value_t (*nval)(value_t), knot
 }
 trie_t* qp_trie_dup(const struct qp_trie *tbl, value_t (*nval)(value_t))
 {
-	trie_t *t = mm_alloc(/*const-cast*/(knot_mm_t*) &tbl->mm, sizeof(trie_t));
+	trie_t *t = mm_alloc(/*const-cast*/(knot_mm_t*)&tbl->mm, sizeof(trie_t));
 	if (unlikely(!t))
 		return NULL;
 	t->mm = tbl->mm;
@@ -532,7 +532,7 @@ static int ns_find_branch(nstack_t *ns, const char *key, uint32_t len
 	do {
 		if (unlikely(ns->len == 1))
 			goto success; // only the root stays on the stack
-		t = (branch_t*) ns->stack[ns->len-2];
+		t = (branch_t*)ns->stack[ns->len-2];
 		if (t->index < index || (t->index == index && t->flags < flags))
 			goto success;
 		--ns->len;
