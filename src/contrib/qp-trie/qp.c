@@ -235,13 +235,14 @@ struct qp_trie* qp_trie_create(knot_mm_t *mm)
 {
 	assert_portability();
 	trie_t *trie = mm_alloc(mm, sizeof(trie_t));
-	if (trie != NULL)
+	if (trie != NULL) {
 		empty_root(&trie->root);
 		trie->weight = 0;
 		if (mm != NULL)
 			trie->mm = *mm;
 		else
 			mm_ctx_init(&trie->mm);
+	}
 	return trie;
 }
 
