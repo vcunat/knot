@@ -28,6 +28,8 @@
 #include "contrib/net.h"
 #include "contrib/sockaddr.h"
 
+#include<linux/filter.h>
+
 /*
  * OS X doesn't support MSG_NOSIGNAL. Use SO_NOSIGPIPE socket option instead.
  */
@@ -161,7 +163,7 @@ static int enable_reuseport(int sock)
 			.filter = code,
 		};
 
-	if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p))) {
+	if (setsockopt(sock, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p))) {
 		return knot_map_errno();
 	}
 #else
