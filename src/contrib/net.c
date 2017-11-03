@@ -1,4 +1,4 @@
-/*  Copyright (C) 2011 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2017 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -145,7 +145,28 @@ static int enable_nonlocal(int sock, int family)
 static int enable_reuseport(int sock)
 {
 #ifdef ENABLE_REUSEPORT
-	return sockopt_enable(sock, SOL_SOCKET, SO_REUSEPORT);
+	int ret = sockopt_enable(sock, SOL_SOCKET, SO_REUSEPORT);
+	if (ret != KNOT_EOK) {
+		return ret;
+	}
+#ifdef SO_ATTACH_REUSEPORT_CBPF
+	struct sock_filter code[] = {
+			/* A = raw_smp_processor_id() */
+			{ BPF_LD  | BPF_W | BPF_ABS, 0, 0, SKF_AD_OFF + SKF_AD_CPU },
+			/* return A */
+			{ BPF_RET | BPF_A, 0, 0, 0 },
+		};
+		struct sock_fprog p = {
+			.len = 2,
+			.filter = code,
+		};
+
+	if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_REUSEPORT_CBPF, &p, sizeof(p))) {
+		return knot_map_errno();
+	}
+#else
+	return ret;
+#endif
 #else
 	return KNOT_ENOTSUP;
 #endif
