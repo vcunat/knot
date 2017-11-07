@@ -118,7 +118,7 @@ static void rrset_memsize(zone_estim_t *est, const zs_scanner_t *scanner)
 		 * guess the actual overhead taken up by the array, so we add
 		 * it each time.
 		 */
-		est->node_size += add_overhead(sizeof(struct rr_data));
+		est->node_size += add_overhead(sizeof(knot_rrset_t));
 	}
 }
 

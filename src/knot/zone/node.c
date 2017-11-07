@@ -29,42 +29,30 @@ void additional_clear(additional_t *additional)
 }
 
 /*! \brief Clears allocated data in RRSet entry. */
-static void rr_data_clear(struct rr_data *data, knot_mm_t *mm)
+static void rr_data_clear(knot_rrset_t *data, knot_mm_t *mm)
 {
 	knot_rdataset_clear(&data->rrs, mm);
 	additional_clear(data->additional);
-}
-
-/*! \brief Clears allocated data in RRSet entry. */
-static int rr_data_from(const knot_rrset_t *rrset, struct rr_data *data, knot_mm_t *mm)
-{
-	int ret = knot_rdataset_copy(&data->rrs, &rrset->rrs, mm);
-	if (ret != KNOT_EOK) {
-		return ret;
-	}
-	data->ttl = rrset->ttl;
-	data->type = rrset->type;
-	data->additional = NULL;
-
-	return KNOT_EOK;
 }
 
 /*! \brief Adds RRSet to node directly. */
 static int add_rrset_no_merge(zone_node_t *node, const knot_rrset_t *rrset,
                               knot_mm_t *mm)
 {
-	if (node == NULL) {
-		return KNOT_EINVAL;
-	}
+	assert(node);
+	assert(rrset);
 
-	const size_t prev_nlen = node->rrset_count * sizeof(struct rr_data);
-	const size_t nlen = (node->rrset_count + 1) * sizeof(struct rr_data);
+	const size_t prev_nlen = node->rrset_count * sizeof(knot_rrset_t);
+	const size_t nlen = (node->rrset_count + 1) * sizeof(knot_rrset_t);
 	void *p = mm_realloc(mm, node->rrs, nlen, prev_nlen);
 	if (p == NULL) {
 		return KNOT_ENOMEM;
 	}
 	node->rrs = p;
-	int ret = rr_data_from(rrset, node->rrs + node->rrset_count, mm);
+	knot_rrset_t *added = node->rrs + node->rrset_count;
+	knot_rrset_init(added, node->owner, rrset->type, rrset->rclass,
+	                rrset->ttl);
+	int ret = knot_rdataset_copy(&added->rrs, &rrset->rrs, mm);
 	if (ret != KNOT_EOK) {
 		return ret;
 	}
@@ -74,7 +62,7 @@ static int add_rrset_no_merge(zone_node_t *node, const knot_rrset_t *rrset,
 }
 
 /*! \brief Checks if the added RR has the same TTL as the first RR in the node. */
-static bool ttl_changed(struct rr_data *node_data, const knot_rrset_t *rrset)
+static bool ttl_changed(knot_rrset_t *node_data, const knot_rrset_t *rrset)
 {
 	if (rrset->type == KNOT_RRTYPE_RRSIG || node_data->rrs.rr_count == 0) {
 		return false;
@@ -152,7 +140,7 @@ zone_node_t *node_shallow_copy(const zone_node_t *src, knot_mm_t *mm)
 
 	// copy RRSets
 	dst->rrset_count = src->rrset_count;
-	size_t rrlen = sizeof(struct rr_data) * src->rrset_count;
+	size_t rrlen = sizeof(knot_rrset_t) * src->rrset_count;
 	dst->rrs = mm_alloc(mm, rrlen);
 	if (dst->rrs == NULL) {
 		node_free(&dst, mm);
@@ -176,7 +164,7 @@ int node_add_rrset(zone_node_t *node, const knot_rrset_t *rrset, knot_mm_t *mm)
 
 	for (uint16_t i = 0; i < node->rrset_count; ++i) {
 		if (node->rrs[i].type == rrset->type) {
-			struct rr_data *node_data = &node->rrs[i];
+			knot_rrset_t *node_data = &node->rrs[i];
 			const bool ttl_change = ttl_changed(node_data, rrset);
 			if (ttl_change) {
 				node_data->ttl = rrset->ttl;
@@ -205,7 +193,7 @@ void node_remove_rdataset(zone_node_t *node, uint16_t type)
 	for (int i = 0; i < node->rrset_count; ++i) {
 		if (node->rrs[i].type == type) {
 			memmove(node->rrs + i, node->rrs + i + 1,
-			        (node->rrset_count - i - 1) * sizeof(struct rr_data));
+			        (node->rrset_count - i - 1) * sizeof(knot_rrset_t));
 			--node->rrset_count;
 			return;
 		}
@@ -220,8 +208,8 @@ knot_rrset_t *node_create_rrset(const zone_node_t *node, uint16_t type)
 
 	for (uint16_t i = 0; i < node->rrset_count; ++i) {
 		if (node->rrs[i].type == type) {
-			knot_rrset_t rrset = node_rrset_at(node, i);
-			return knot_rrset_copy(&rrset, NULL);
+			knot_rrset_t *rrset = node_rrset_at(node, i);
+			return knot_rrset_copy(rrset, NULL);
 		}
 	}
 

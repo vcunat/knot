@@ -96,14 +96,14 @@ static bool want_dnssec(knotd_qdata_t *qdata)
 
 static uint32_t dnskey_ttl(knotd_qdata_t *qdata)
 {
-	knot_rrset_t soa = knotd_qdata_zone_apex_rrset(qdata, KNOT_RRTYPE_SOA);
-	return soa.ttl;
+	knot_rrset_t *soa = knotd_qdata_zone_apex_rrset(qdata, KNOT_RRTYPE_SOA);
+	return soa->ttl;
 }
 
 static uint32_t nsec_ttl(knotd_qdata_t *qdata)
 {
-	knot_rrset_t soa = knotd_qdata_zone_apex_rrset(qdata, KNOT_RRTYPE_SOA);
-	return knot_soa_minimum(&soa.rrs);
+	knot_rrset_t *soa = knotd_qdata_zone_apex_rrset(qdata, KNOT_RRTYPE_SOA);
+	return knot_soa_minimum(&soa->rrs);
 }
 
 /*!

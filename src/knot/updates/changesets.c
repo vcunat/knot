@@ -130,15 +130,13 @@ static void iter_next_node(changeset_iter_t *ch_it, trie_it_t *t_it)
 }
 
 /*! \brief Gets next RRSet from trie iterators. */
-static knot_rrset_t get_next_rr(changeset_iter_t *ch_it, trie_it_t *t_it)
+static knot_rrset_t *get_next_rr(changeset_iter_t *ch_it, trie_it_t *t_it)
 {
 	if (ch_it->node == NULL || ch_it->node_pos == ch_it->node->rrset_count) {
 		iter_next_node(ch_it, t_it);
 		if (ch_it->node == NULL) {
 			assert(trie_it_finished(t_it));
-			knot_rrset_t rr;
-			knot_rrset_init_empty(&rr);
-			return rr;
+			return NULL;
 		}
 	}
 
@@ -163,24 +161,23 @@ static void check_redundancy(zone_contents_t *counterpart, const knot_rrset_t *r
 	}
 
 	// Subtract the data from node's RRSet.
-	knot_rdataset_t *rrs = node_rdataset(node, rr->type);
-	uint32_t rrs_ttl = node_rrset(node, rr->type).ttl;
+	knot_rrset_t *rrs = node_rrset(node, rr->type);
 
-	if (fixed_rr != NULL && *fixed_rr != NULL && (*fixed_rr)->ttl == rrs_ttl) {
-		int ret = knot_rdataset_subtract(&(*fixed_rr)->rrs, rrs, NULL);
+	if (fixed_rr != NULL && *fixed_rr != NULL && (*fixed_rr)->ttl == rrs->ttl) {
+		int ret = knot_rdataset_subtract(&(*fixed_rr)->rrs, &rrs->rrs, NULL);
 		if (ret != KNOT_EOK) {
 			return;
 		}
 	}
 
-	if (rr->ttl == rrs_ttl) {
-		int ret = knot_rdataset_subtract(rrs, &rr->rrs, NULL);
+	if (rrs->ttl == rr->ttl) {
+		int ret = knot_rdataset_subtract(&rrs->rrs, &rr->rrs, NULL);
 		if (ret != KNOT_EOK) {
 			return;
 		}
 	}
 
-	if (knot_rdataset_size(rrs) == 0) {
+	if (knot_rrset_empty(rrs)) {
 		// Remove empty type.
 		node_remove_rdataset(node, rr->type);
 
@@ -241,10 +238,10 @@ bool changeset_empty(const changeset_t *ch)
 	changeset_iter_t itt;
 	changeset_iter_all(&itt, ch);
 
-	knot_rrset_t rr = changeset_iter_next(&itt);
+	knot_rrset_t *rr = changeset_iter_next(&itt);
 	changeset_iter_clear(&itt);
 
-	return knot_rrset_empty(&rr);
+	return knot_rrset_empty(rr);
 }
 
 size_t changeset_size(const changeset_t *ch)
@@ -257,8 +254,8 @@ size_t changeset_size(const changeset_t *ch)
 	changeset_iter_all(&itt, ch);
 
 	size_t size = 0;
-	knot_rrset_t rr = changeset_iter_next(&itt);
-	while(!knot_rrset_empty(&rr)) {
+	knot_rrset_t *rr = changeset_iter_next(&itt);
+	while(!knot_rrset_empty(rr)) {
 		++size;
 		rr = changeset_iter_next(&itt);
 	}
@@ -383,9 +380,9 @@ int changeset_merge(changeset_t *ch1, const changeset_t *ch2, int flags)
 	changeset_iter_t itt;
 	changeset_iter_rem(&itt, ch2);
 
-	knot_rrset_t rrset = changeset_iter_next(&itt);
-	while (!knot_rrset_empty(&rrset)) {
-		int ret = changeset_add_removal(ch1, &rrset, CHANGESET_CHECK | flags);
+	knot_rrset_t *rrset = changeset_iter_next(&itt);
+	while (!knot_rrset_empty(rrset)) {
+		int ret = changeset_add_removal(ch1, rrset, CHANGESET_CHECK | flags);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&itt);
 			return ret;
@@ -397,8 +394,8 @@ int changeset_merge(changeset_t *ch1, const changeset_t *ch2, int flags)
 	changeset_iter_add(&itt, ch2);
 
 	rrset = changeset_iter_next(&itt);
-	while (!knot_rrset_empty(&rrset)) {
-		int ret = changeset_add_addition(ch1, &rrset, CHANGESET_CHECK | flags);
+	while (!knot_rrset_empty(rrset)) {
+		int ret = changeset_add_addition(ch1, rrset, CHANGESET_CHECK | flags);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&itt);
 			return ret;
@@ -433,8 +430,8 @@ static int preapply_fix_rrset(const knot_rrset_t *apply, bool adding, void *data
 {
 	preapply_fix_ctx *ctx  = (preapply_fix_ctx *)data;
 	const zone_node_t *znode = zone_contents_find_node(ctx->zone, apply->owner);
-	const knot_rdataset_t *zrdataset = node_rdataset(znode, apply->type);
-	if (adding && zrdataset == NULL) {
+	knot_rrset_t *zrrset = node_rrset(znode, apply->type);
+	if (adding && zrrset == NULL) {
 		return KNOT_EOK;
 	}
 
@@ -451,11 +448,10 @@ static int preapply_fix_rrset(const knot_rrset_t *apply, bool adding, void *data
 
 	int ret = KNOT_EOK;
 	if (adding) {
-		ret = knot_rdataset_intersect(zrdataset, &apply->rrs, &fixrrset->rrs, ctx->mm);
+		ret = knot_rdataset_intersect(&zrrset->rrs, &apply->rrs, &fixrrset->rrs, ctx->mm);
 	} else {
-		uint32_t zrrset_ttl = node_rrset(znode, apply->type).ttl;
-		if (zrdataset != NULL && fixrrset->ttl == zrrset_ttl) {
-			ret = knot_rdataset_subtract(&fixrrset->rrs, zrdataset, ctx->mm);
+		if (zrrset != NULL && fixrrset->ttl == zrrset->ttl) {
+			ret = knot_rdataset_subtract(&fixrrset->rrs, &zrrset->rrs, ctx->mm);
 		}
 	}
 	if (ret == KNOT_EOK && !knot_rrset_empty(fixrrset)) {
@@ -559,8 +555,8 @@ changeset_t *changeset_from_contents(const zone_contents_t *contents)
 
 	changeset_t *res = changeset_new(copy->apex->owner);
 
-	knot_rrset_t soa_rr = node_rrset(copy->apex, KNOT_RRTYPE_SOA);;
-	res->soa_to = knot_rrset_copy(&soa_rr, NULL);
+	knot_rrset_t *soa_rr = node_rrset(copy->apex, KNOT_RRTYPE_SOA);;
+	res->soa_to = knot_rrset_copy(soa_rr, NULL);
 
 	node_remove_rdataset(copy->apex, KNOT_RRTYPE_SOA);
 
@@ -647,12 +643,11 @@ int changeset_iter_all(changeset_iter_t *itt, const changeset_t *ch)
 	                           ch->remove->nodes, ch->remove->nsec3_nodes);
 }
 
-knot_rrset_t changeset_iter_next(changeset_iter_t *it)
+knot_rrset_t *changeset_iter_next(changeset_iter_t *it)
 {
 	assert(it);
 	ptrnode_t *n = NULL;
-	knot_rrset_t rr;
-	knot_rrset_init_empty(&rr);
+	knot_rrset_t *rr = NULL;
 	WALK_LIST(n, it->iters) {
 		trie_it_t *t_it = (trie_it_t *)n->d;
 		if (trie_it_finished(t_it)) {
@@ -660,7 +655,7 @@ knot_rrset_t changeset_iter_next(changeset_iter_t *it)
 		}
 
 		rr = get_next_rr(it, t_it);
-		if (!knot_rrset_empty(&rr)) {
+		if (!knot_rrset_empty(rr)) {
 			// Got valid RRSet.
 			return rr;
 		}
@@ -686,9 +681,9 @@ int changeset_walk(const changeset_t *changeset, changeset_walk_callback callbac
 		return ret;
 	}
 
-	knot_rrset_t rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		ret = callback(&rrset, false, ctx);
+	knot_rrset_t *rrset = changeset_iter_next(&it);
+	while (!knot_rrset_empty(rrset)) {
+		ret = callback(rrset, false, ctx);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&it);
 			return ret;
@@ -703,8 +698,8 @@ int changeset_walk(const changeset_t *changeset, changeset_walk_callback callbac
 	}
 
 	rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		ret = callback(&rrset, true, ctx);
+	while (!knot_rrset_empty(rrset)) {
+		ret = callback(rrset, true, ctx);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&it);
 			return ret;

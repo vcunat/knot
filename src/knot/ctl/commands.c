@@ -556,14 +556,14 @@ static int send_node(zone_node_t *node, void *ctx_void)
 	}
 
 	for (size_t i = 0; i < node->rrset_count; ++i) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
+		knot_rrset_t *rrset = node_rrset_at(node, i);
 
 		// Check for requested TYPE.
-		if (ctx->type_filter != -1 && rrset.type != ctx->type_filter) {
+		if (ctx->type_filter != -1 && rrset->type != ctx->type_filter) {
 			continue;
 		}
 
-		int ret = send_rrset(&rrset, ctx);
+		int ret = send_rrset(rrset, ctx);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -746,15 +746,15 @@ static int send_changeset_part(changeset_t *ch, send_ctx_t *ctx, bool from)
 		return ret;
 	}
 
-	knot_rrset_t rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		char *owner = knot_dname_to_str(ctx->owner, rrset.owner, sizeof(ctx->owner));
+	knot_rrset_t *rrset = changeset_iter_next(&it);
+	while (!knot_rrset_empty(rrset)) {
+		char *owner = knot_dname_to_str(ctx->owner, rrset->owner, sizeof(ctx->owner));
 		if (owner == NULL) {
 			changeset_iter_clear(&it);
 			return KNOT_EINVAL;
 		}
 
-		ret = send_rrset(&rrset, ctx);
+		ret = send_rrset(rrset, ctx);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&it);
 			return ret;
@@ -824,7 +824,7 @@ static int get_ttl(zone_t *zone, ctl_args_t *args, uint32_t *ttl)
 		return KNOT_EINVAL;
 	}
 
-	*ttl = node_rrset(node, type).ttl;
+	*ttl = node_rrset(node, type)->ttl;
 
 	return KNOT_EOK;
 }

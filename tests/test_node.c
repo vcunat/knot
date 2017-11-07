@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
 	const bool copy_ok = knot_dname_is_equal(copy->owner, node->owner) &&
 	                     copy->rrset_count == node->rrset_count &&
 	                     memcmp(copy->rrs, node->rrs,
-	                            copy->rrset_count * sizeof(struct rr_data)) == 0 &&
+	                            copy->rrset_count * sizeof(knot_rrset_t)) == 0 &&
 	                     copy->flags == node->flags;
 	ok(copy_ok, "Node: shallow copy - set fields.");
 
@@ -95,11 +95,11 @@ int main(int argc, char *argv[])
 	n_rrset = node_create_rrset(node, KNOT_RRTYPE_SOA);
 	ok(n_rrset == NULL, "Node: create non-existing RRSet.");
 
-	knot_rrset_t stack_rrset = node_rrset(node, KNOT_RRTYPE_TXT);
-	ok(knot_rrset_equal(&stack_rrset, dummy_rrset,
+	knot_rrset_t *stack_rrset = node_rrset(node, KNOT_RRTYPE_TXT);
+	ok(knot_rrset_equal(stack_rrset, dummy_rrset,
 	                    KNOT_RRSET_COMPARE_WHOLE), "Node: get existing RRSet.");
 	stack_rrset = node_rrset(node, KNOT_RRTYPE_SOA);
-	ok(knot_rrset_empty(&stack_rrset), "Node: get non-existent RRSet.");
+	ok(knot_rrset_empty(stack_rrset), "Node: get non-existent RRSet.");
 
 	knot_rdataset_t *n_rdataset = node_rdataset(node, KNOT_RRTYPE_TXT);
 	ok(n_rdataset && knot_rdataset_eq(n_rdataset, &dummy_rrset->rrs),
@@ -108,10 +108,10 @@ int main(int argc, char *argv[])
 	ok(n_rdataset == NULL, "Node: get non-existing rdataset.");
 
 	stack_rrset = node_rrset_at(node, 0);
-	ok(knot_rrset_equal(&stack_rrset, dummy_rrset, KNOT_RRSET_COMPARE_WHOLE),
+	ok(knot_rrset_equal(stack_rrset, dummy_rrset, KNOT_RRSET_COMPARE_WHOLE),
 	   "Node: get existing position.");
 	stack_rrset = node_rrset_at(node, 1);
-	ok(knot_rrset_empty(&stack_rrset), "Node: get non-existent position.");
+	ok(knot_rrset_empty(stack_rrset), "Node: get non-existent position.");
 
 	// Test TTL mismatch
 	dummy_rrset->ttl = 1800;

@@ -247,7 +247,7 @@ int changeset_iter_all(changeset_iter_t *itt, const changeset_t *ch);
  *
  * \return Next RRSet in iterator, empty RRSet if iteration done.
  */
-knot_rrset_t changeset_iter_next(changeset_iter_t *it);
+knot_rrset_t *changeset_iter_next(changeset_iter_t *it);
 
 /*!
  * \brief Free resources allocated by changeset iterator.

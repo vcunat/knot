@@ -178,11 +178,11 @@ static bool changesets_eq(const changeset_t *ch1, changeset_t *ch2)
 	changeset_iter_t it2;
 	changeset_iter_all(&it2, ch2);
 
-	knot_rrset_t rr1 = changeset_iter_next(&it1);
-	knot_rrset_t rr2 = changeset_iter_next(&it2);
+	knot_rrset_t *rr1 = changeset_iter_next(&it1);
+	knot_rrset_t *rr2 = changeset_iter_next(&it2);
 	bool ret = true;
-	while (!knot_rrset_empty(&rr1)) {
-		if (!knot_rrset_equal(&rr1, &rr2, KNOT_RRSET_COMPARE_WHOLE)) {
+	while (!knot_rrset_empty(rr1)) {
+		if (!knot_rrset_equal(rr1, rr2, KNOT_RRSET_COMPARE_WHOLE)) {
 			ret = false;
 			break;
 		}
@@ -542,8 +542,8 @@ int tm_rrcnt(const changeset_t * ch, int flg)
 	if (flg >= 0) changeset_iter_add(&it, ch);
 	else changeset_iter_rem(&it, ch);
 
-	knot_rrset_t rri;
-	while (rri = changeset_iter_next(&it), !knot_rrset_empty(&rri)) i++;
+	knot_rrset_t *rri;
+	while (rri = changeset_iter_next(&it), !knot_rrset_empty(rri)) i++;
 
 	changeset_iter_clear(&it);
 	return i;

@@ -18,8 +18,7 @@
 #include <assert.h>
 #include <tap/basic.h>
 
-#include "libknot/errcode.h"
-#include "libknot/error.h"
+#include "libknot/libknot.h"
 #include "knot/updates/changesets.h"
 
 int main(int argc, char *argv[])
@@ -84,18 +83,18 @@ int main(int argc, char *argv[])
 	ret = changeset_iter_add(&it, ch);
 	is_int(KNOT_EOK, ret, "changeset: create iter add");
 	// Order: non.terminals.test. TXT, SPF, here.come.more.non.terminals.test. TXT.
-	knot_rrset_t iter = changeset_iter_next(&it);
-	bool trav_ok = knot_rrset_equal(&iter, apex_txt_rr, KNOT_RRSET_COMPARE_WHOLE);
+	knot_rrset_t *iter = changeset_iter_next(&it);
+	bool trav_ok = knot_rrset_equal(iter, apex_txt_rr, KNOT_RRSET_COMPARE_WHOLE);
 	iter = changeset_iter_next(&it);
-	trav_ok = trav_ok && knot_rrset_equal(&iter, apex_spf_rr, KNOT_RRSET_COMPARE_WHOLE);
+	trav_ok = trav_ok && knot_rrset_equal(iter, apex_spf_rr, KNOT_RRSET_COMPARE_WHOLE);
 	iter = changeset_iter_next(&it);
-	trav_ok = trav_ok && knot_rrset_equal(&iter, other_rr, KNOT_RRSET_COMPARE_WHOLE);
+	trav_ok = trav_ok && knot_rrset_equal(iter, other_rr, KNOT_RRSET_COMPARE_WHOLE);
 
 	ok(trav_ok, "changeset: add traversal");
 
 	iter = changeset_iter_next(&it);
 	changeset_iter_clear(&it);
-	ok(knot_rrset_empty(&iter), "changeset: traversal: skip non-terminals");
+	ok(knot_rrset_empty(iter), "changeset: traversal: skip non-terminals");
 
 	changeset_add_removal(ch, apex_txt_rr, CHANGESET_CHECK);
 	changeset_add_removal(ch, apex_txt_rr, CHANGESET_CHECK);
@@ -104,7 +103,7 @@ int main(int argc, char *argv[])
 	ret = changeset_iter_rem(&it, ch);
 	is_int(KNOT_EOK, ret, "changeset: create iter rem");
 	iter = changeset_iter_next(&it);
-	ok(knot_rrset_equal(&iter, apex_txt_rr, KNOT_RRSET_COMPARE_WHOLE),
+	ok(knot_rrset_equal(iter, apex_txt_rr, KNOT_RRSET_COMPARE_WHOLE),
 	   "changeset: rem traversal");
 	changeset_iter_clear(&it);
 
@@ -113,7 +112,7 @@ int main(int argc, char *argv[])
 	is_int(KNOT_EOK, ret, "changest: create iter all");
 	size_t size = 0;
 	iter = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&iter)) {
+	while (!knot_rrset_empty(iter)) {
 		++size;
 		iter = changeset_iter_next(&it);
 	}

@@ -48,12 +48,12 @@ static int ixfr_put_chg_part(knot_pkt_t *pkt, struct ixfr_proc *ixfr,
 	assert(ixfr);
 	assert(itt);
 
-	if (knot_rrset_empty(&ixfr->cur_rr)) {
+	if (knot_rrset_empty(ixfr->cur_rr)) {
 		ixfr->cur_rr = changeset_iter_next(itt);
 	}
 
-	while (!knot_rrset_empty(&ixfr->cur_rr)) {
-		IXFR_SAFE_PUT(pkt, &ixfr->cur_rr);
+	while (!knot_rrset_empty(ixfr->cur_rr)) {
+		IXFR_SAFE_PUT(pkt, ixfr->cur_rr);
 		ixfr->cur_rr = changeset_iter_next(itt);
 	}
 
@@ -63,7 +63,7 @@ static int ixfr_put_chg_part(knot_pkt_t *pkt, struct ixfr_proc *ixfr,
 /*! \brief Tests if iteration has started. */
 static bool iter_empty(struct ixfr_proc *ixfr)
 {
-	return EMPTY_LIST(ixfr->cur.iters) && knot_rrset_empty(&ixfr->cur_rr);
+	return EMPTY_LIST(ixfr->cur.iters) && knot_rrset_empty(ixfr->cur_rr);
 }
 
 /*!
@@ -224,7 +224,7 @@ static int ixfr_answer_init(knotd_qdata_t *qdata)
 	init_list(&xfer->proc.nodes);
 	init_list(&xfer->changesets);
 	init_list(&xfer->cur.iters);
-	knot_rrset_init_empty(&xfer->cur_rr);
+	knot_rrset_init_empty(xfer->cur_rr);
 	add_tail_list(&xfer->changesets, &chgsets);
 	xfer->qdata = qdata;
 
@@ -269,11 +269,11 @@ static int ixfr_answer_soa(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 
 	/* Guaranteed to have zone contents. */
 	const zone_node_t *apex = qdata->extra->zone->contents->apex;
-	knot_rrset_t soa_rr = node_rrset(apex, KNOT_RRTYPE_SOA);
-	if (knot_rrset_empty(&soa_rr)) {
+	knot_rrset_t *soa_rr = node_rrset(apex, KNOT_RRTYPE_SOA);
+	if (knot_rrset_empty(soa_rr)) {
 		return KNOT_STATE_FAIL;
 	}
-	ret = knot_pkt_put(pkt, 0, &soa_rr, 0);
+	ret = knot_pkt_put(pkt, 0, soa_rr, 0);
 	if (ret != KNOT_EOK) {
 		qdata->rcode = KNOT_RCODE_SERVFAIL;
 		return KNOT_STATE_FAIL;

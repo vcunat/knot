@@ -1021,7 +1021,7 @@ static int try_refresh(conf_t *conf, zone_t *zone, const conf_remote_t *master, 
 	assert(zone);
 	assert(master);
 
-	knot_rrset_t soa = { 0 };
+	knot_rrset_t *soa = NULL;
 	if (zone->contents) {
 		soa = node_rrset(zone->contents->apex, KNOT_RRTYPE_SOA);
 	}
@@ -1030,7 +1030,7 @@ static int try_refresh(conf_t *conf, zone_t *zone, const conf_remote_t *master, 
 		.zone = zone,
 		.conf = conf,
 		.remote = (struct sockaddr *)&master->addr,
-		.soa = zone->contents ? &soa : NULL,
+		.soa = soa,
 		.max_zone_size = max_zone_size(conf, zone->name),
 	};
 

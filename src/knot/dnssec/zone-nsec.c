@@ -96,9 +96,9 @@ static int mark_removed_nsec3(const zone_contents_t *zone, changeset_t *ch)
 	changeset_iter_t itt;
 	changeset_iter_rem(&itt, ch);
 
-	knot_rrset_t rr = changeset_iter_next(&itt);
-	while (!knot_rrset_empty(&rr)) {
-		int ret = mark_nsec3(&rr, zone->nsec3_nodes);
+	knot_rrset_t *rr = changeset_iter_next(&itt);
+	while (!knot_rrset_empty(rr)) {
+		int ret = mark_nsec3(rr, zone->nsec3_nodes);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&itt);
 			return ret;
@@ -219,18 +219,18 @@ static int remove_nsec3param(const zone_contents_t *zone, changeset_t *changeset
 	assert(zone);
 	assert(changeset);
 
-	knot_rrset_t rrset = node_rrset(zone->apex, KNOT_RRTYPE_NSEC3PARAM);
-	int ret = changeset_add_removal(changeset, &rrset, 0);
+	knot_rrset_t *rrset = node_rrset(zone->apex, KNOT_RRTYPE_NSEC3PARAM);
+	int ret = changeset_add_removal(changeset, rrset, 0);
 	if (ret != KNOT_EOK) {
 		return ret;
 	}
 
 	rrset = node_rrset(zone->apex, KNOT_RRTYPE_RRSIG);
-	if (!knot_rrset_empty(&rrset)) {
+	if (!knot_rrset_empty(rrset)) {
 		knot_rrset_t rrsig;
 		knot_rrset_init(&rrsig, zone->apex->owner, KNOT_RRTYPE_RRSIG,
 		                KNOT_CLASS_IN, 0);
-		ret = knot_synth_rrsig(KNOT_RRTYPE_NSEC3PARAM, &rrset.rrs, &rrsig.rrs, NULL);
+		ret = knot_synth_rrsig(KNOT_RRTYPE_NSEC3PARAM, &rrset->rrs, &rrsig.rrs, NULL);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}

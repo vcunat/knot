@@ -16,12 +16,7 @@
 
 #pragma once
 
-#include "libknot/descriptor.h"
-#include "libknot/dname.h"
 #include "libknot/rrset.h"
-#include "libknot/rdataset.h"
-
-struct rr_data;
 
 /*!
  * \brief Structure representing one node in a domain name tree, i.e. one domain
@@ -32,7 +27,7 @@ typedef struct zone_node {
 	struct zone_node *parent; /*!< Parent node in the name hierarchy. */
 
 	/*! \brief Array with data of RRSets belonging to this node. */
-	struct rr_data *rrs;
+	knot_rrset_t *rrs;
 
 	/*!
 	 * \brief Previous node in canonical order. Only authoritative
@@ -57,14 +52,6 @@ typedef struct {
 	glue_t *glues; /*!< Glue data. */
 	uint16_t count; /*!< Number of glue nodes. */
 } additional_t;
-
-/*!< \brief Structure storing RR data. */
-struct rr_data {
-	uint32_t ttl; /*!< RRSet TTL. */
-	uint16_t type; /*!< RR type of data. */
-	knot_rdataset_t rrs; /*!< Data of given type. */
-	additional_t *additional; /*!< Additional nodes with glues. */
-};
 
 /*! \brief Flags used to mark nodes with some property. */
 enum node_flags {
@@ -225,25 +212,22 @@ bool node_bitmap_equal(const zone_node_t *a, const zone_node_t *b);
  * \param node   Node containing RRSet.
  * \param type   RRSet type we want to get.
  *
- * \return RRSet structure with wanted type, or empty RRSet.
+ * \return RRSet structure with wanted type, or NULL.
  */
-static inline knot_rrset_t node_rrset(const zone_node_t *node, uint16_t type)
+static inline knot_rrset_t *node_rrset(const zone_node_t *node, uint16_t type)
 {
-	knot_rrset_t rrset;
-	for (uint16_t i = 0; node && i < node->rrset_count; ++i) {
+	if (node == NULL) {
+		return NULL;
+	}
+
+	for (int i = 0; i < node->rrset_count; ++i) {
 		if (node->rrs[i].type == type) {
-			struct rr_data *rr_data = &node->rrs[i];
-			knot_rrset_init(&rrset, node->owner, type, KNOT_CLASS_IN,
-			                rr_data->ttl);
-			rrset.rrs = rr_data->rrs;
-			rrset.additional = rr_data->additional;
-			return rrset;
+			return &node->rrs[i];
 		}
 	}
-	knot_rrset_init_empty(&rrset);
-	return rrset;
-}
 
+	return NULL;
+}
 /*!
  * \brief Returns RRSet structure initialized with data from node at position
  *        equal to \a pos.
@@ -253,18 +237,11 @@ static inline knot_rrset_t node_rrset(const zone_node_t *node, uint16_t type)
  *
  * \return RRSet structure with data from wanted position, or empty RRSet.
  */
-static inline knot_rrset_t node_rrset_at(const zone_node_t *node, size_t pos)
+static inline knot_rrset_t *node_rrset_at(const zone_node_t *node, size_t pos)
 {
-	knot_rrset_t rrset;
 	if (node == NULL || pos >= node->rrset_count) {
-		knot_rrset_init_empty(&rrset);
-		return rrset;
+		return NULL;
 	}
 
-	struct rr_data *rr_data = &node->rrs[pos];
-	knot_rrset_init(&rrset, node->owner, rr_data->type, KNOT_CLASS_IN,
-	                rr_data->ttl);
-	rrset.rrs = rr_data->rrs;
-	rrset.additional = rr_data->additional;
-	return rrset;
+	return &node->rrs[pos];
 }

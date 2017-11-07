@@ -135,7 +135,7 @@ int event_notify(conf_t *conf, zone_t *zone)
 
 	// NOTIFY content
 	int timeout = conf->cache.srv_tcp_reply_timeout * 1000;
-	knot_rrset_t soa = node_rrset(zone->contents->apex, KNOT_RRTYPE_SOA);
+	knot_rrset_t *soa = node_rrset(zone->contents->apex, KNOT_RRTYPE_SOA);
 
 	// send NOTIFY to each remote, use working address
 	conf_val_t notify = conf_zone_get(conf, C_NOTIFY, zone->name);
@@ -145,7 +145,7 @@ int event_notify(conf_t *conf, zone_t *zone)
 
 		for (int i = 0; i < addr_count; i++) {
 			conf_remote_t slave = conf_remote(conf, &notify, i);
-			int ret = send_notify(conf, zone, &soa, &slave, timeout);
+			int ret = send_notify(conf, zone, soa, &slave, timeout);
 			if (ret == KNOT_EOK) {
 				break;
 			}

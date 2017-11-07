@@ -124,9 +124,6 @@ static bool have_dnssec(knotd_qdata_t *qdata)
  */
 static int put_answer(knot_pkt_t *pkt, uint16_t type, knotd_qdata_t *qdata)
 {
-	knot_rrset_t rrset;
-	knot_rrset_init_empty(&rrset);
-
 	/* Wildcard expansion or exact match, either way RRSet owner is
 	 * is QNAME. We can fake name synthesis by setting compression hint to
 	 * QNAME position. Just need to check if we're answering QNAME and not
@@ -141,6 +138,8 @@ static int put_answer(knot_pkt_t *pkt, uint16_t type, knotd_qdata_t *qdata)
 	                        KNOT_PF_NULL : KNOT_PF_NOTRUNC;
 
 	int ret = KNOT_EOK;
+	knot_rrset_t *rrset;
+
 	switch (type) {
 	case KNOT_RRTYPE_ANY: /* Append all RRSets. */ {
 		conf_val_t val = conf_zone_get(conf(), C_DISABLE_ANY,
@@ -153,7 +152,7 @@ static int put_answer(knot_pkt_t *pkt, uint16_t type, knotd_qdata_t *qdata)
 		}
 		for (unsigned i = 0; i < qdata->extra->node->rrset_count; ++i) {
 			rrset = node_rrset_at(qdata->extra->node, i);
-			ret = process_query_put_rr(pkt, qdata, &rrset, NULL,
+			ret = process_query_put_rr(pkt, qdata, rrset, NULL,
 			                           compr_hint, put_rr_flags);
 			if (ret != KNOT_EOK) {
 				break;
@@ -163,9 +162,9 @@ static int put_answer(knot_pkt_t *pkt, uint16_t type, knotd_qdata_t *qdata)
 	}
 	default: /* Single RRSet of given type. */
 		rrset = node_rrset(qdata->extra->node, type);
-		if (!knot_rrset_empty(&rrset)) {
-			knot_rrset_t rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
-			ret = process_query_put_rr(pkt, qdata, &rrset, &rrsigs,
+		if (!knot_rrset_empty(rrset)) {
+			knot_rrset_t *rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
+			ret = process_query_put_rr(pkt, qdata, rrset, rrsigs,
 			                           compr_hint, put_rr_flags);
 		}
 		break;
@@ -178,9 +177,9 @@ static int put_answer(knot_pkt_t *pkt, uint16_t type, knotd_qdata_t *qdata)
 static int put_authority_soa(knot_pkt_t *pkt, knotd_qdata_t *qdata,
                              const zone_contents_t *zone)
 {
-	knot_rrset_t soa = node_rrset(zone->apex, KNOT_RRTYPE_SOA);
-	knot_rrset_t rrsigs = node_rrset(zone->apex, KNOT_RRTYPE_RRSIG);
-	return process_query_put_rr(pkt, qdata, &soa, &rrsigs,
+	knot_rrset_t *soa = node_rrset(zone->apex, KNOT_RRTYPE_SOA);
+	knot_rrset_t *rrsigs = node_rrset(zone->apex, KNOT_RRTYPE_RRSIG);
+	return process_query_put_rr(pkt, qdata, soa, rrsigs,
 	                            KNOT_COMPR_HINT_NONE, KNOT_PF_NOTRUNC);
 }
 
@@ -193,9 +192,9 @@ static int put_delegation(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 	}
 
 	/* Insert NS record. */
-	knot_rrset_t rrset = node_rrset(qdata->extra->node, KNOT_RRTYPE_NS);
-	knot_rrset_t rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
-	return process_query_put_rr(pkt, qdata, &rrset, &rrsigs,
+	knot_rrset_t *rrset = node_rrset(qdata->extra->node, KNOT_RRTYPE_NS);
+	knot_rrset_t *rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
+	return process_query_put_rr(pkt, qdata, rrset, rrsigs,
 	                            KNOT_COMPR_HINT_NONE, 0);
 }
 
@@ -228,13 +227,13 @@ static int put_additional(knot_pkt_t *pkt, const knot_rrset_t *rr,
 
 		uint16_t hint = knot_pkt_compr_hint(info, KNOT_COMPR_HINT_RDATA +
 		                                    glue->ns_pos);
-		knot_rrset_t rrsigs = node_rrset(glue->node, KNOT_RRTYPE_RRSIG);
+		knot_rrset_t *rrsigs = node_rrset(glue->node, KNOT_RRTYPE_RRSIG);
 		for (int k = 0; k < ar_type_count; ++k) {
-			knot_rrset_t rrset = node_rrset(glue->node, ar_type_list[k]);
-			if (knot_rrset_empty(&rrset)) {
+			knot_rrset_t *rrset = node_rrset(glue->node, ar_type_list[k]);
+			if (knot_rrset_empty(rrset)) {
 				continue;
 			}
-			ret = process_query_put_rr(pkt, qdata, &rrset, &rrsigs,
+			ret = process_query_put_rr(pkt, qdata, rrset, rrsigs,
 			                           hint, flags);
 			if (ret != KNOT_EOK) {
 				break;
@@ -248,17 +247,17 @@ static int put_additional(knot_pkt_t *pkt, const knot_rrset_t *rr,
 static int follow_cname(knot_pkt_t *pkt, uint16_t rrtype, knotd_qdata_t *qdata)
 {
 	const zone_node_t *cname_node = qdata->extra->node;
-	knot_rrset_t cname_rr = node_rrset(qdata->extra->node, rrtype);
-	knot_rrset_t rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
+	knot_rrset_t *cname_rr = node_rrset(cname_node, rrtype);
+	knot_rrset_t *rrsigs = node_rrset(cname_node, KNOT_RRTYPE_RRSIG);
 
-	assert(!knot_rrset_empty(&cname_rr));
+	assert(!knot_rrset_empty(cname_rr));
 
 	/* Check whether RR is already in the packet. */
 	uint16_t flags = KNOT_PF_CHECKDUP;
 
 	/* Now, try to put CNAME to answer. */
 	uint16_t rr_count_before = pkt->rrset_count;
-	int ret = process_query_put_rr(pkt, qdata, &cname_rr, &rrsigs, 0, flags);
+	int ret = process_query_put_rr(pkt, qdata, cname_rr, rrsigs, 0, flags);
 	switch (ret) {
 	case KNOT_EOK:    break;
 	case KNOT_ESPACE: return KNOTD_IN_STATE_TRUNC;
@@ -273,17 +272,17 @@ static int follow_cname(knot_pkt_t *pkt, uint16_t rrtype, knotd_qdata_t *qdata)
 
 	/* Synthesize CNAME if followed DNAME. */
 	if (rrtype == KNOT_RRTYPE_DNAME) {
-		if (dname_cname_cannot_synth(&cname_rr, qdata->name)) {
+		if (dname_cname_cannot_synth(cname_rr, qdata->name)) {
 			qdata->rcode = KNOT_RCODE_YXDOMAIN;
 		} else {
-			knot_rrset_t dname_rr = cname_rr;
+			knot_rrset_t dname_rr = *cname_rr;
 			int ret = dname_cname_synth(&dname_rr, qdata->name,
-			                            &cname_rr, &pkt->mm);
+			                            cname_rr, &pkt->mm);
 			if (ret != KNOT_EOK) {
 				qdata->rcode = KNOT_RCODE_SERVFAIL;
 				return KNOTD_IN_STATE_ERROR;
 			}
-			ret = process_query_put_rr(pkt, qdata, &cname_rr, NULL, 0, KNOT_PF_FREE);
+			ret = process_query_put_rr(pkt, qdata, cname_rr, NULL, 0, KNOT_PF_FREE);
 			switch (ret) {
 			case KNOT_EOK:    break;
 			case KNOT_ESPACE: return KNOTD_IN_STATE_TRUNC;
@@ -309,7 +308,7 @@ static int follow_cname(knot_pkt_t *pkt, uint16_t rrtype, knotd_qdata_t *qdata)
 	}
 
 	/* Now follow the next CNAME TARGET. */
-	qdata->name = knot_cname_name(&cname_rr.rrs);
+	qdata->name = knot_cname_name(&cname_rr->rrs);
 
 	return KNOTD_IN_STATE_FOLLOW;
 }
@@ -375,8 +374,8 @@ static int name_not_found(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 	}
 
 	/* Name is under DNAME, use it for substitution. */
-	knot_rrset_t dname_rrset = node_rrset(qdata->extra->encloser, KNOT_RRTYPE_DNAME);
-	if (!knot_rrset_empty(&dname_rrset)) {
+	knot_rrset_t *dname_rrset = node_rrset(qdata->extra->encloser, KNOT_RRTYPE_DNAME);
+	if (!knot_rrset_empty(dname_rrset)) {
 		qdata->extra->node = qdata->extra->encloser; /* Follow encloser as new node. */
 		return follow_cname(pkt, KNOT_RRTYPE_DNAME, qdata);
 	}

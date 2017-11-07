@@ -40,19 +40,19 @@ static int load_soas(const zone_contents_t *zone1, const zone_contents_t *zone2,
 		return KNOT_EINVAL;
 	}
 
-	knot_rrset_t soa_rrset1 = node_rrset(apex1, KNOT_RRTYPE_SOA);
-	knot_rrset_t soa_rrset2 = node_rrset(apex2, KNOT_RRTYPE_SOA);
-	if (knot_rrset_empty(&soa_rrset1) || knot_rrset_empty(&soa_rrset2)) {
+	knot_rrset_t *soa_rrset1 = node_rrset(apex1, KNOT_RRTYPE_SOA);
+	knot_rrset_t *soa_rrset2 = node_rrset(apex2, KNOT_RRTYPE_SOA);
+	if (knot_rrset_empty(soa_rrset1) || knot_rrset_empty(soa_rrset2)) {
 		return KNOT_EINVAL;
 	}
 
-	if (soa_rrset1.rrs.rr_count == 0 ||
-	    soa_rrset2.rrs.rr_count == 0) {
+	if (soa_rrset1->rrs.rr_count == 0 ||
+	    soa_rrset2->rrs.rr_count == 0) {
 		return KNOT_EINVAL;
 	}
 
-	uint32_t soa_serial1 = knot_soa_serial(&soa_rrset1.rrs);
-	uint32_t soa_serial2 = knot_soa_serial(&soa_rrset2.rrs);
+	uint32_t soa_serial1 = knot_soa_serial(&soa_rrset1->rrs);
+	uint32_t soa_serial2 = knot_soa_serial(&soa_rrset2->rrs);
 
 	if (serial_compare(soa_serial1, soa_serial2) == SERIAL_EQUAL) {
 		return KNOT_ENODIFF;
@@ -62,11 +62,11 @@ static int load_soas(const zone_contents_t *zone1, const zone_contents_t *zone2,
 		return KNOT_ERANGE;
 	}
 
-	changeset->soa_from = knot_rrset_copy(&soa_rrset1, NULL);
+	changeset->soa_from = knot_rrset_copy(soa_rrset1, NULL);
 	if (changeset->soa_from == NULL) {
 		return KNOT_ENOMEM;
 	}
-	changeset->soa_to = knot_rrset_copy(&soa_rrset2, NULL);
+	changeset->soa_to = knot_rrset_copy(soa_rrset2, NULL);
 	if (changeset->soa_to == NULL) {
 		knot_rrset_free(&changeset->soa_from, NULL);
 		return KNOT_ENOMEM;
@@ -79,8 +79,8 @@ static int add_node(const zone_node_t *node, changeset_t *changeset)
 {
 	/* Add all rrsets from node. */
 	for (unsigned i = 0; i < node->rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
-		int ret = changeset_add_addition(changeset, &rrset, 0);
+		knot_rrset_t *rrset = node_rrset_at(node, i);
+		int ret = changeset_add_addition(changeset, rrset, 0);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -93,8 +93,8 @@ static int remove_node(const zone_node_t *node, changeset_t *changeset)
 {
 	/* Remove all the RRSets of the node. */
 	for (unsigned i = 0; i < node->rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
-		int ret = changeset_add_removal(changeset, &rrset, 0);
+		knot_rrset_t *rrset = node_rrset_at(node, i);
+		int ret = changeset_add_removal(changeset, rrset, 0);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -227,25 +227,25 @@ static int knot_zone_diff_node(zone_node_t **node_ptr, void *data)
 
 	for (unsigned i = 0; i < node->rrset_count; i++) {
 		/* Search for the RRSet in the node from the second tree. */
-		knot_rrset_t rrset = node_rrset_at(node, i);
+		knot_rrset_t *rrset = node_rrset_at(node, i);
 
 		/* SOAs are handled explicitly. */
-		if (rrset.type == KNOT_RRTYPE_SOA) {
+		if (rrset->type == KNOT_RRTYPE_SOA) {
 			continue;
 		}
 
-		knot_rrset_t rrset_from_second_node =
-			node_rrset(node_in_second_tree, rrset.type);
-		if (knot_rrset_empty(&rrset_from_second_node)) {
+		knot_rrset_t *rrset_from_second_node =
+			node_rrset(node_in_second_tree, rrset->type);
+		if (knot_rrset_empty(rrset_from_second_node)) {
 			/* RRSet has been removed. Make a copy and remove. */
 			int ret = changeset_add_removal(
-				param->changeset, &rrset, 0);
+				param->changeset, rrset, 0);
 			if (ret != KNOT_EOK) {
 				return ret;
 			}
 		} else {
 			/* Diff RRSets. */
-			int ret = diff_rrsets(&rrset, &rrset_from_second_node,
+			int ret = diff_rrsets(rrset, rrset_from_second_node,
 			                      param->changeset);
 			if (ret != KNOT_EOK) {
 				return ret;
@@ -255,18 +255,18 @@ static int knot_zone_diff_node(zone_node_t **node_ptr, void *data)
 
 	for (unsigned i = 0; i < node_in_second_tree->rrset_count; i++) {
 		/* Search for the RRSet in the node from the second tree. */
-		knot_rrset_t rrset = node_rrset_at(node_in_second_tree, i);
+		knot_rrset_t *rrset = node_rrset_at(node_in_second_tree, i);
 
 		/* SOAs are handled explicitly. */
-		if (rrset.type == KNOT_RRTYPE_SOA) {
+		if (rrset->type == KNOT_RRTYPE_SOA) {
 			continue;
 		}
 
-		knot_rrset_t rrset_from_first_node = node_rrset(node, rrset.type);
-		if (knot_rrset_empty(&rrset_from_first_node)) {
+		knot_rrset_t *rrset_from_first_node = node_rrset(node, rrset->type);
+		if (knot_rrset_empty(rrset_from_first_node)) {
 			/* RRSet has been added. Make a copy and add. */
 			int ret = changeset_add_addition(
-				param->changeset, &rrset, 0);
+				param->changeset, rrset, 0);
 			if (ret != KNOT_EOK) {
 				return ret;
 			}

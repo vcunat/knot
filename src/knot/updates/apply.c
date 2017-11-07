@@ -46,9 +46,9 @@ static int free_additional(zone_node_t **node, void *data)
 	UNUSED(data);
 
 	for (uint16_t i = 0; i < (*node)->rrset_count; ++i) {
-		struct rr_data *data = &(*node)->rrs[i];
-		additional_clear(data->additional);
-		data->additional = NULL;
+		knot_rrset_t *rrset = &(*node)->rrs[i];
+		additional_clear(rrset->additional);
+		rrset->additional = NULL;
 	}
 
 	return KNOT_EOK;
@@ -60,13 +60,7 @@ static int free_additional(zone_node_t **node, void *data)
 static int replace_rdataset_with_copy(zone_node_t *node, uint16_t type)
 {
 	// Find data to copy.
-	struct rr_data *data = NULL;
-	for (uint16_t i = 0; i < node->rrset_count; ++i) {
-		if (node->rrs[i].type == type) {
-			data = &node->rrs[i];
-			break;
-		}
-	}
+	knot_rrset_t *data = node_rrset(node, type);
 	assert(data);
 
 	// Create new data.
@@ -75,7 +69,6 @@ static int replace_rdataset_with_copy(zone_node_t *node, uint16_t type)
 	if (copy == NULL) {
 		return KNOT_ENOMEM;
 	}
-
 	memcpy(copy, rrs->data, knot_rdataset_size(rrs));
 
 	// Store new data into node RRS.
@@ -144,9 +137,9 @@ static int apply_remove(apply_ctx_t *ctx, const changeset_t *chset)
 	changeset_iter_t itt;
 	changeset_iter_rem(&itt, chset);
 
-	knot_rrset_t rr = changeset_iter_next(&itt);
-	while (!knot_rrset_empty(&rr)) {
-		int ret = apply_remove_rr(ctx, &rr);
+	knot_rrset_t *rr = changeset_iter_next(&itt);
+	while (!knot_rrset_empty(rr)) {
+		int ret = apply_remove_rr(ctx, rr);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&itt);
 			return ret;
@@ -165,9 +158,9 @@ static int apply_add(apply_ctx_t *ctx, const changeset_t *chset)
 	changeset_iter_t itt;
 	changeset_iter_add(&itt, chset);
 
-	knot_rrset_t rr = changeset_iter_next(&itt);
-	while(!knot_rrset_empty(&rr)) {
-		int ret = apply_add_rr(ctx, &rr);
+	knot_rrset_t *rr = changeset_iter_next(&itt);
+	while(!knot_rrset_empty(rr)) {
+		int ret = apply_add_rr(ctx, rr);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&itt);
 			return ret;
@@ -261,10 +254,10 @@ int apply_add_rr(apply_ctx_t *ctx, const knot_rrset_t *rr)
 		return KNOT_ENOMEM;
 	}
 
-	knot_rrset_t changed_rrset = node_rrset(node, rr->type);
-	if (!knot_rrset_empty(&changed_rrset)) {
+	knot_rrset_t *changed_rrset = node_rrset(node, rr->type);
+	if (!knot_rrset_empty(changed_rrset)) {
 		// Modifying existing RRSet.
-		knot_rdata_t *old_data = changed_rrset.rrs.data;
+		knot_rdata_t *old_data = changed_rrset->rrs.data;
 		int ret = replace_rdataset_with_copy(node, rr->type);
 		if (ret != KNOT_EOK) {
 			return ret;
@@ -325,8 +318,8 @@ int apply_remove_rr(apply_ctx_t *ctx, const knot_rrset_t *rr)
 	zone_tree_t *tree = knot_rrset_is_nsec3rel(rr) ?
 	                    contents->nsec3_nodes : contents->nodes;
 
-	knot_rrset_t removed_rrset = node_rrset(node, rr->type);
-	knot_rdata_t *old_data = removed_rrset.rrs.data;
+	knot_rrset_t *removed_rrset = node_rrset(node, rr->type);
+	knot_rdata_t *old_data = removed_rrset->rrs.data;
 	int ret = replace_rdataset_with_copy(node, rr->type);
 	if (ret != KNOT_EOK) {
 		return ret;

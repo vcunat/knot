@@ -190,9 +190,9 @@ size_t changeset_serialized_size(const changeset_t *ch)
 	changeset_iter_all(&it, ch);
 
 	size_t change_size = 0;
-	knot_rrset_t rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		change_size += rrset_binary_size(&rrset);
+	knot_rrset_t *rrset = changeset_iter_next(&it);
+	while (!knot_rrset_empty(rrset)) {
+		change_size += rrset_binary_size(rrset);
 		rrset = changeset_iter_next(&it);
 	}
 
@@ -236,9 +236,9 @@ int changeset_serialize(const changeset_t *ch, uint8_t *dst_chunks[],
 		return ret;
 	}
 
-	knot_rrset_t rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		ret = serialize_rrset_chunks(&wire, &rrset, dst_chunks, chunk_size,
+	knot_rrset_t *rrset = changeset_iter_next(&it);
+	while (!knot_rrset_empty(rrset)) {
+		ret = serialize_rrset_chunks(&wire, rrset, dst_chunks, chunk_size,
 		                             chunks_count, chunks_real_sizes, &cur_chunk);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&it);
@@ -263,8 +263,8 @@ serialize_to:
 	}
 
 	rrset = changeset_iter_next(&it);
-	while (!knot_rrset_empty(&rrset)) {
-		ret = serialize_rrset_chunks(&wire, &rrset, dst_chunks, chunk_size,
+	while (!knot_rrset_empty(rrset)) {
+		ret = serialize_rrset_chunks(&wire, rrset, dst_chunks, chunk_size,
 		                             chunks_count, chunks_real_sizes, &cur_chunk);
 		if (ret != KNOT_EOK) {
 			changeset_iter_clear(&it);

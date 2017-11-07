@@ -60,9 +60,9 @@ static bool are_nsec3_nodes_equal(const zone_node_t *a, const zone_node_t *b)
 		return false;
 	}
 
-	knot_rrset_t a_rrset = node_rrset(a, KNOT_RRTYPE_NSEC3);
-	knot_rrset_t b_rrset = node_rrset(b, KNOT_RRTYPE_NSEC3);
-	return knot_rrset_equal(&a_rrset, &b_rrset, KNOT_RRSET_COMPARE_WHOLE);
+	knot_rrset_t *a_rrset = node_rrset(a, KNOT_RRTYPE_NSEC3);
+	knot_rrset_t *b_rrset = node_rrset(b, KNOT_RRTYPE_NSEC3);
+	return knot_rrset_equal(a_rrset, b_rrset, KNOT_RRSET_COMPARE_WHOLE);
 }
 
 static bool nsec3_opt_out(const zone_node_t *node, bool opt_out_enabled)
@@ -82,13 +82,13 @@ static bool nsec3_opt_out(const zone_node_t *node, bool opt_out_enabled)
 static bool node_should_be_signed_nsec3(const zone_node_t *n)
 {
 	for (int i = 0; i < n->rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(n, i);
-		if (rrset.type == KNOT_RRTYPE_NSEC ||
-		    rrset.type == KNOT_RRTYPE_RRSIG) {
+		knot_rrset_t *rrset = node_rrset_at(n, i);
+		if (rrset->type == KNOT_RRTYPE_NSEC ||
+		    rrset->type == KNOT_RRTYPE_RRSIG) {
 			continue;
 		}
 
-		if (knot_zone_sign_rr_should_be_signed(n, &rrset)) {
+		if (knot_zone_sign_rr_should_be_signed(n, rrset)) {
 			return true;
 		}
 	}
@@ -107,11 +107,11 @@ static int shallow_copy_signature(const zone_node_t *from, zone_node_t *to)
 	assert(valid_nsec3_node(from));
 	assert(valid_nsec3_node(to));
 
-	knot_rrset_t from_sig = node_rrset(from, KNOT_RRTYPE_RRSIG);
-	if (knot_rrset_empty(&from_sig)) {
+	knot_rrset_t *from_sig = node_rrset(from, KNOT_RRTYPE_RRSIG);
+	if (knot_rrset_empty(from_sig)) {
 		return KNOT_EOK;
 	}
-	return node_add_rrset(to, &from_sig, NULL);
+	return node_add_rrset(to, from_sig, NULL);
 }
 
 /*!
@@ -443,30 +443,30 @@ static int connect_nsec3_nodes2(zone_node_t *a, zone_node_t *b,
 	assert(data);
 
 	// check if the NSEC3 rrset has not been updated in changeset
-	knot_rrset_t aorig = node_rrset(a, KNOT_RRTYPE_NSEC3);
+	knot_rrset_t *aorig = node_rrset(a, KNOT_RRTYPE_NSEC3);
 	const zone_node_t *ch_a = zone_contents_find_nsec3_node(data->changeset->add, a->owner);
 	if (node_rrtype_exists(ch_a, KNOT_RRTYPE_NSEC3)) {
 		aorig = node_rrset(ch_a, KNOT_RRTYPE_NSEC3);
 	}
 
 	// prepare a copy of NSEC3 rrsets in question
-	knot_rrset_t *acopy = knot_rrset_copy(&aorig, NULL);
+	knot_rrset_t *acopy = knot_rrset_copy(aorig, NULL);
 	if (acopy == NULL) {
 		return KNOT_ENOMEM;
 	}
 
 	// connect the copied rrset
 	int ret = connect_nsec3_base(&acopy->rrs, b->owner);
-	if (ret != KNOT_EOK || knot_rrset_equal(&aorig, acopy, KNOT_RRSET_COMPARE_WHOLE)) {
+	if (ret != KNOT_EOK || knot_rrset_equal(aorig, acopy, KNOT_RRSET_COMPARE_WHOLE)) {
 		knot_rrset_free(&acopy, NULL);
 		return ret;
 	}
 
 	// add the removed original and the updated copy to changeset
 	if (node_rrtype_exists(ch_a, KNOT_RRTYPE_NSEC3)) {
-		ret = changeset_remove_addition(data->changeset, &aorig);
+		ret = changeset_remove_addition(data->changeset, aorig);
 	} else {
-		ret = changeset_add_removal(data->changeset, &aorig, 0);
+		ret = changeset_add_removal(data->changeset, aorig, 0);
 	}
 	if (ret == KNOT_EOK) {
 		ret = changeset_add_addition(data->changeset, acopy, CHANGESET_CHECK | CHANGESET_CHECK_CANCELOUT);
@@ -591,21 +591,21 @@ static int fix_nsec3_for_node(zone_update_t *update, const dnssec_nsec3_params_t
 	// remove (all) existing NSEC3
 	const zone_node_t *old_nsec3_n = zone_contents_find_nsec3_node(update->zone->contents, for_node_hashed);
 	if (old_nsec3_n != NULL) {
-		knot_rrset_t rem_nsec3 = node_rrset(old_nsec3_n, KNOT_RRTYPE_NSEC3);
-		if (!knot_rrset_empty(&rem_nsec3)) {
-			knot_rrset_t rem_rrsig = node_rrset(old_nsec3_n, KNOT_RRTYPE_RRSIG);
+		knot_rrset_t *rem_nsec3 = node_rrset(old_nsec3_n, KNOT_RRTYPE_NSEC3);
+		if (!knot_rrset_empty(rem_nsec3)) {
+			knot_rrset_t *rem_rrsig = node_rrset(old_nsec3_n, KNOT_RRTYPE_RRSIG);
 			if (!add_nsec3) {
-				ret = zone_update_remove(update, &rem_nsec3);
-				if (ret == KNOT_EOK && !knot_rrset_empty(&rem_rrsig)) {
-					ret = zone_update_remove(update, &rem_rrsig);
+				ret = zone_update_remove(update, rem_nsec3);
+				if (ret == KNOT_EOK && !knot_rrset_empty(rem_rrsig)) {
+					ret = zone_update_remove(update, rem_rrsig);
 				}
 			} else {
-				ret = changeset_add_removal(chgset, &rem_nsec3, CHANGESET_CHECK | CHANGESET_CHECK_CANCELOUT);
-				if (ret == KNOT_EOK && !knot_rrset_empty(&rem_rrsig)) {
-					ret = changeset_add_removal(chgset, &rem_rrsig, 0);
+				ret = changeset_add_removal(chgset, rem_nsec3, CHANGESET_CHECK | CHANGESET_CHECK_CANCELOUT);
+				if (ret == KNOT_EOK && !knot_rrset_empty(rem_rrsig)) {
+					ret = changeset_add_removal(chgset, rem_rrsig, 0);
 				}
 			}
-			knot_nsec3_next_hashed(&rem_nsec3.rrs, 0, &next_hash, &next_length);
+			knot_nsec3_next_hashed(&rem_nsec3->rrs, 0, &next_hash, &next_length);
 		}
 	}
 
@@ -615,14 +615,14 @@ static int fix_nsec3_for_node(zone_update_t *update, const dnssec_nsec3_params_t
 		if (new_nsec3_n == NULL) {
 			return KNOT_ENOMEM;
 		}
-		knot_rrset_t add_nsec3 = node_rrset(new_nsec3_n, KNOT_RRTYPE_NSEC3);
-		assert(!knot_rrset_empty(&add_nsec3));
+		knot_rrset_t *add_nsec3 = node_rrset(new_nsec3_n, KNOT_RRTYPE_NSEC3);
+		assert(!knot_rrset_empty(add_nsec3));
 
 		// copy hash of next element from removed record
 		if (next_hash != NULL) {
 			uint8_t *raw_hash = NULL;
 			uint8_t raw_length = 0;
-			knot_nsec3_next_hashed(&add_nsec3.rrs, 0, &raw_hash, &raw_length);
+			knot_nsec3_next_hashed(&add_nsec3->rrs, 0, &raw_hash, &raw_length);
 			assert(raw_hash != NULL);
 			if (raw_length != next_length) {
 				ret = KNOT_EMALF;
@@ -632,9 +632,9 @@ static int fix_nsec3_for_node(zone_update_t *update, const dnssec_nsec3_params_t
 		}
 		if (ret == KNOT_EOK) {
 			if (next_hash == NULL) {
-				ret = zone_update_add(update, &add_nsec3);
+				ret = zone_update_add(update, add_nsec3);
 			} else {
-				ret = changeset_add_addition(chgset, &add_nsec3, CHANGESET_CHECK | CHANGESET_CHECK_CANCELOUT);
+				ret = changeset_add_addition(chgset, add_nsec3, CHANGESET_CHECK | CHANGESET_CHECK_CANCELOUT);
 			}
 		}
 		node_free_rrsets(new_nsec3_n, NULL);

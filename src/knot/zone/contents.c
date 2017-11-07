@@ -110,14 +110,15 @@ static int create_nsec3_name(uint8_t *out, size_t out_size,
 }
 
 /*! \brief Link pointers to additional nodes for this RRSet. */
-static int discover_additionals(const knot_dname_t *owner, struct rr_data *rr_data,
+static int discover_additionals(const knot_dname_t *owner, knot_rrset_t *rr_data,
                                 zone_contents_t *zone)
 {
 	assert(rr_data != NULL);
 
 	/* Drop possible previous additional nodes. */
-	additional_clear(rr_data->additional);
-	rr_data->additional = NULL;
+	additional_t **additional = (additional_t **)&rr_data->additional;
+	additional_clear(*additional);
+	*additional = NULL;
 
 	const knot_rdataset_t *rrs = &rr_data->rrs;
 	uint16_t rdcount = rrs->rr_count;
@@ -162,22 +163,22 @@ static int discover_additionals(const knot_dname_t *owner, struct rr_data *rr_da
 	/* Store sorted additionals by the type, mandatory first. */
 	size_t total_count = mandatory_count + others_count;
 	if (total_count > 0) {
-		rr_data->additional = malloc(sizeof(additional_t));
-		if (rr_data->additional == NULL) {
+		*additional = malloc(sizeof(additional_t));
+		if (*additional == NULL) {
 			return KNOT_ENOMEM;
 		}
-		rr_data->additional->count = total_count;
+		(*additional)->count = total_count;
 
 		size_t size = total_count * sizeof(glue_t);
-		rr_data->additional->glues = malloc(size);
-		if (rr_data->additional->glues == NULL) {
-			free(rr_data->additional);
+		(*additional)->glues = malloc(size);
+		if ((*additional)->glues == NULL) {
+			free(*additional);
 			return KNOT_ENOMEM;
 		}
 
 		size_t mandatory_size = mandatory_count * sizeof(glue_t);
-		memcpy(rr_data->additional->glues, mandatory, mandatory_size);
-		memcpy(rr_data->additional->glues + mandatory_count, others,
+		memcpy((*additional)->glues, mandatory, mandatory_size);
+		memcpy((*additional)->glues + mandatory_count, others,
 		       size - mandatory_size);
 	}
 
@@ -256,8 +257,8 @@ static int measure_size(zone_node_t *node, void *data){
 	size_t *size = data;
 	int rrset_count = node->rrset_count;
 	for (int i = 0; i < rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
-		*size += knot_rrset_size(&rrset);
+		knot_rrset_t *rrset = node_rrset_at(node, i);
+		*size += knot_rrset_size(rrset);
 	}
 	return KNOT_EOK;
 }
@@ -334,7 +335,7 @@ static int adjust_additional(zone_node_t **tnode, void *data)
 
 	/* Lookup additional records for specific nodes. */
 	for(uint16_t i = 0; i < node->rrset_count; ++i) {
-		struct rr_data *rr_data = &node->rrs[i];
+		knot_rrset_t *rr_data = &node->rrs[i];
 		if (knot_rrtype_additional_needed(rr_data->type)) {
 			int ret = discover_additionals(node->owner, rr_data, args->zone);
 			if (ret != KNOT_EOK) {

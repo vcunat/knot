@@ -402,9 +402,9 @@ const knot_dname_t *knotd_qdata_zone_name(knotd_qdata_t *qdata);
  * \param[in] qdata  Query data.
  * \param[in] type   Rrset type.
  *
- * \return A copy of the zone apex rrset.
+ * \return Zone apex rrset.
  */
-knot_rrset_t knotd_qdata_zone_apex_rrset(knotd_qdata_t *qdata, uint16_t type);
+knot_rrset_t *knotd_qdata_zone_apex_rrset(knotd_qdata_t *qdata, uint16_t type);
 
 /*! General query processing states. */
 typedef enum {

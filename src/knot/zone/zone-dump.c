@@ -38,25 +38,25 @@ typedef struct {
 
 static int apex_node_dump_text(zone_node_t *node, dump_params_t *params)
 {
-	knot_rrset_t soa = node_rrset(node, KNOT_RRTYPE_SOA);
+	knot_rrset_t *soa = node_rrset(node, KNOT_RRTYPE_SOA);
 	knot_dump_style_t soa_style = *params->style;
 
 	// Dump SOA record as a first.
 	if (!params->dump_nsec) {
-		int ret = knot_rrset_txt_dump(&soa, &params->buf, &params->buflen,
+		int ret = knot_rrset_txt_dump(soa, &params->buf, &params->buflen,
 		                              &soa_style);
 		if (ret < 0) {
 			return ret;
 		}
-		params->rr_count += soa.rrs.rr_count;
+		params->rr_count += soa->rrs.rr_count;
 		fprintf(params->file, "%s", params->buf);
 		params->buf[0] = '\0';
 	}
 
 	// Dump other records.
 	for (uint16_t i = 0; i < node->rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
-		switch (rrset.type) {
+		knot_rrset_t *rrset = node_rrset_at(node, i);
+		switch (rrset->type) {
 		case KNOT_RRTYPE_NSEC:
 			continue;
 		case KNOT_RRTYPE_RRSIG:
@@ -67,12 +67,12 @@ static int apex_node_dump_text(zone_node_t *node, dump_params_t *params)
 			break;
 		}
 
-		int ret = knot_rrset_txt_dump(&rrset, &params->buf, &params->buflen,
+		int ret = knot_rrset_txt_dump(rrset, &params->buf, &params->buflen,
 		                              params->style);
 		if (ret < 0) {
 			return ret;
 		}
-		params->rr_count +=  rrset.rrs.rr_count;
+		params->rr_count +=  rrset->rrs.rr_count;
 		fprintf(params->file, "%s", params->buf);
 		params->buf[0] = '\0';
 	}
@@ -93,8 +93,8 @@ static int node_dump_text(zone_node_t *node, void *data)
 
 	// Dump non-apex rrsets.
 	for (uint16_t i = 0; i < node->rrset_count; i++) {
-		knot_rrset_t rrset = node_rrset_at(node, i);
-		switch (rrset.type) {
+		knot_rrset_t *rrset = node_rrset_at(node, i);
+		switch (rrset->type) {
 		case KNOT_RRTYPE_RRSIG:
 			if (params->dump_rrsig) {
 				break;
@@ -123,12 +123,12 @@ static int node_dump_text(zone_node_t *node, void *data)
 			params->first_comment = NULL;
 		}
 
-		int ret = knot_rrset_txt_dump(&rrset, &params->buf, &params->buflen,
+		int ret = knot_rrset_txt_dump(rrset, &params->buf, &params->buflen,
 		                              params->style);
 		if (ret < 0) {
 			return ret;
 		}
-		params->rr_count += rrset.rrs.rr_count;
+		params->rr_count += rrset->rrs.rr_count;
 		fprintf(params->file, "%s", params->buf);
 		params->buf[0] = '\0';
 	}

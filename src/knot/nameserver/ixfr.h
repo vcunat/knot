@@ -41,7 +41,7 @@ struct ixfr_proc {
 	list_t changesets;
 
 	/* Currenty processed changeset. */
-	knot_rrset_t cur_rr;
+	knot_rrset_t *cur_rr;
 	changeset_iter_t cur;
 	const knot_rrset_t *soa_from;
 	const knot_rrset_t *soa_to;

@@ -68,9 +68,9 @@ static int check_rrset_exists(zone_update_t *update, const knot_rrset_t *rrset,
 		*rcode = KNOT_RCODE_NXRRSET;
 		return KNOT_EPREREQ;
 	} else {
-		knot_rrset_t found = node_rrset(node, rrset->type);
-		assert(!knot_rrset_empty(&found));
-		if (knot_rrset_equal(&found, rrset, KNOT_RRSET_COMPARE_WHOLE)) {
+		knot_rrset_t *found = node_rrset(node, rrset->type);
+		assert(!knot_rrset_empty(found));
+		if (knot_rrset_equal(found, rrset, KNOT_RRSET_COMPARE_WHOLE)) {
 			return KNOT_EOK;
 		} else {
 			*rcode = KNOT_RCODE_NXRRSET;
@@ -290,16 +290,15 @@ static bool node_contains_rr(const zone_node_t *node,
 }
 
 /*!< \brief Returns true if CNAME is in this node. */
-static bool adding_to_cname(const knot_dname_t *owner,
-                            const zone_node_t *node)
+static bool adding_to_cname(const zone_node_t *node)
 {
 	if (node == NULL) {
 		// Node did not exist before update.
 		return false;
 	}
 
-	knot_rrset_t cname = node_rrset(node, KNOT_RRTYPE_CNAME);
-	if (knot_rrset_empty(&cname)) {
+	knot_rrset_t *cname = node_rrset(node, KNOT_RRTYPE_CNAME);
+	if (knot_rrset_empty(cname)) {
 		// Node did not contain CNAME before update.
 		return false;
 	}
@@ -368,14 +367,14 @@ static int process_add_cname(const zone_node_t *node,
                              const knot_rrset_t *rr,
                              zone_update_t *update)
 {
-	knot_rrset_t cname = node_rrset(node, KNOT_RRTYPE_CNAME);
-	if (!knot_rrset_empty(&cname)) {
+	knot_rrset_t *cname = node_rrset(node, KNOT_RRTYPE_CNAME);
+	if (!knot_rrset_empty(cname)) {
 		// If they are identical, ignore.
-		if (knot_rrset_equal(&cname, rr, KNOT_RRSET_COMPARE_WHOLE)) {
+		if (knot_rrset_equal(cname, rr, KNOT_RRSET_COMPARE_WHOLE)) {
 			return KNOT_EOK;
 		}
 
-		int ret = zone_update_remove(update, &cname);
+		int ret = zone_update_remove(update, cname);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -403,8 +402,8 @@ static int process_add_nsec3param(const zone_node_t *node,
 		free(owner);
 		return KNOT_EDENIED;
 	}
-	knot_rrset_t param = node_rrset(node, KNOT_RRTYPE_NSEC3PARAM);
-	if (knot_rrset_empty(&param)) {
+	knot_rrset_t *param = node_rrset(node, KNOT_RRTYPE_NSEC3PARAM);
+	if (knot_rrset_empty(param)) {
 		return add_rr_to_chgset(rr, update);
 	}
 
@@ -429,8 +428,8 @@ static int process_add_soa(const zone_node_t *node,
 	}
 
 	// Get current SOA RR.
-	knot_rrset_t removed = node_rrset(node, KNOT_RRTYPE_SOA);
-	if (knot_rrset_equal(&removed, rr, KNOT_RRSET_COMPARE_WHOLE)) {
+	knot_rrset_t *removed = node_rrset(node, KNOT_RRTYPE_SOA);
+	if (knot_rrset_equal(removed, rr, KNOT_RRSET_COMPARE_WHOLE)) {
 		// If they are identical, ignore.
 		return KNOT_EOK;
 	}
@@ -443,7 +442,7 @@ static int process_add_normal(const zone_node_t *node,
                               const knot_rrset_t *rr,
                               zone_update_t *update)
 {
-	if (adding_to_cname(rr->owner, node)) {
+	if (adding_to_cname(node)) {
 		// Adding RR to CNAME node, ignore.
 		return KNOT_EOK;
 	}
@@ -500,8 +499,8 @@ static int process_rem_rr(const knot_rrset_t *rr,
 		}
 	}
 
-	knot_rrset_t to_modify = node_rrset(node, rr->type);
-	if (knot_rrset_empty(&to_modify)) {
+	knot_rrset_t *to_modify = node_rrset(node, rr->type);
+	if (knot_rrset_empty(to_modify)) {
 		// No such RRSet
 		return KNOT_EOK;
 	}
@@ -542,8 +541,8 @@ static int process_rem_rrset(const knot_rrset_t *rrset,
 		return KNOT_EOK;
 	}
 
-	knot_rrset_t to_remove = node_rrset(node, rrset->type);
-	return zone_update_remove(update, &to_remove);
+	knot_rrset_t *to_remove = node_rrset(node, rrset->type);
+	return zone_update_remove(update, to_remove);
 }
 
 /*!< \brief Removes node from zone. */
@@ -562,8 +561,8 @@ static int process_rem_node(const knot_rrset_t *rr,
 	// Remove all RRSets from node
 	size_t rrset_count = node_copy->rrset_count;
 	for (int i = 0; i < rrset_count; ++i) {
-		knot_rrset_t rrset = node_rrset_at(node_copy, rrset_count - i - 1);
-		int ret = process_rem_rrset(&rrset, node_copy, update);
+		knot_rrset_t *rrset = node_rrset_at(node_copy, rrset_count - i - 1);
+		int ret = process_rem_rrset(rrset, node_copy, update);
 		if (ret != KNOT_EOK) {
 			node_free(&node_copy, NULL);
 			return ret;

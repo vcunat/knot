@@ -80,9 +80,9 @@ static int replace_soa(zone_contents_t *contents, const knot_rrset_t *rr)
 		return KNOT_EDENIED;
 	}
 
-	knot_rrset_t old_soa = node_rrset(contents->apex, KNOT_RRTYPE_SOA);
+	knot_rrset_t *old_soa = node_rrset(contents->apex, KNOT_RRTYPE_SOA);
 	zone_node_t *n = contents->apex;
-	int ret = zone_contents_remove_rr(contents, &old_soa, &n);
+	int ret = zone_contents_remove_rr(contents, old_soa, &n);
 	if (ret != KNOT_EOK && ret != KNOT_EINVAL) {
 		return ret;
 	}
@@ -397,11 +397,11 @@ int zone_update_remove_rrset(zone_update_t *update, knot_dname_t *owner, uint16_
 		/* Remove the RRSet from the original node */
 		const zone_node_t *node = zone_contents_find_node(update->new_cont, owner);
 		if (node != NULL) {
-			knot_rrset_t rrset = node_rrset(node, type);
-			if (rrset.owner == NULL) {
+			knot_rrset_t *rrset = node_rrset(node, type);
+			if (rrset->owner == NULL) {
 				return KNOT_ENOENT;
 			}
-			int ret = changeset_add_removal(&update->change, &rrset,
+			int ret = changeset_add_removal(&update->change, rrset,
 			                                CHANGESET_CHECK);
 			if (ret != KNOT_EOK) {
 				return ret;
@@ -412,7 +412,7 @@ int zone_update_remove_rrset(zone_update_t *update, knot_dname_t *owner, uint16_
 				return KNOT_EOK;
 			}
 
-			ret = apply_remove_rr(update->a_ctx, &rrset);
+			ret = apply_remove_rr(update->a_ctx, rrset);
 			if (ret != KNOT_EOK) {
 				return ret;
 			}
@@ -426,8 +426,8 @@ int zone_update_remove_rrset(zone_update_t *update, knot_dname_t *owner, uint16_
 			return KNOT_ENONODE;
 		}
 
-		knot_rrset_t rrset = node_rrset(node, type);
-		int ret = zone_update_remove(update, &rrset);
+		knot_rrset_t *rrset = node_rrset(node, type);
+		int ret = zone_update_remove(update, rrset);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -448,19 +448,19 @@ int zone_update_remove_node(zone_update_t *update, const knot_dname_t *owner)
 		if (node != NULL) {
 			size_t rrset_count = node->rrset_count;
 			for (int i = 0; i < rrset_count; ++i) {
-				knot_rrset_t rrset = node_rrset_at(node, rrset_count - 1 - i);
-				int ret = changeset_add_removal(&update->change, &rrset,
+				knot_rrset_t *rrset = node_rrset_at(node, rrset_count - 1 - i);
+				int ret = changeset_add_removal(&update->change, rrset,
 				                                CHANGESET_CHECK);
 				if (ret != KNOT_EOK) {
 					return ret;
 				}
 
-				if (rrset.type == KNOT_RRTYPE_SOA) {
+				if (rrset->type == KNOT_RRTYPE_SOA) {
 					/* SOA is replaced with addition */
 					continue;
 				}
 
-				ret = apply_remove_rr(update->a_ctx, &rrset);
+				ret = apply_remove_rr(update->a_ctx, rrset);
 				if (ret != KNOT_EOK) {
 					return ret;
 				}
@@ -477,8 +477,8 @@ int zone_update_remove_node(zone_update_t *update, const knot_dname_t *owner)
 
 		size_t rrset_count = node->rrset_count;
 		for (int i = 0; i < rrset_count; ++i) {
-			knot_rrset_t rrset = node_rrset_at(node, rrset_count - 1 - i);
-			int ret = zone_update_remove(update, &rrset);
+			knot_rrset_t *rrset = node_rrset_at(node, rrset_count - 1 - i);
+			int ret = zone_update_remove(update, rrset);
 			if (ret != KNOT_EOK) {
 				return ret;
 			}

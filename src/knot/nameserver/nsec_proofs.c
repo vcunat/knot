@@ -141,14 +141,14 @@ static int put_nxt_from_node(const zone_node_t *node,
 {
 	assert(type == KNOT_RRTYPE_NSEC || type == KNOT_RRTYPE_NSEC3);
 
-	knot_rrset_t rrset = node_rrset(node, type);
-	if (knot_rrset_empty(&rrset)) {
+	knot_rrset_t *rrset = node_rrset(node, type);
+	if (knot_rrset_empty(rrset)) {
 		return KNOT_EOK;
 	}
 
-	knot_rrset_t rrsigs = node_rrset(node, KNOT_RRTYPE_RRSIG);
+	knot_rrset_t *rrsigs = node_rrset(node, KNOT_RRTYPE_RRSIG);
 
-	return process_query_put_rr(resp, qdata, &rrset, &rrsigs,
+	return process_query_put_rr(resp, qdata, rrset, rrsigs,
 	                            KNOT_COMPR_HINT_NONE, KNOT_PF_CHECKDUP);
 }
 
@@ -634,10 +634,10 @@ int nsec_prove_dp_security(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 
 	// Add DS into the response.
 
-	knot_rrset_t rrset = node_rrset(qdata->extra->node, KNOT_RRTYPE_DS);
-	if (!knot_rrset_empty(&rrset)) {
-		knot_rrset_t rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
-		return process_query_put_rr(pkt, qdata, &rrset, &rrsigs,
+	knot_rrset_t *rrset = node_rrset(qdata->extra->node, KNOT_RRTYPE_DS);
+	if (!knot_rrset_empty(rrset)) {
+		knot_rrset_t *rrsigs = node_rrset(qdata->extra->node, KNOT_RRTYPE_RRSIG);
+		return process_query_put_rr(pkt, qdata, rrset, rrsigs,
 		                            KNOT_COMPR_HINT_NONE, 0);
 	}
 

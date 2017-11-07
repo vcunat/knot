@@ -28,11 +28,11 @@ int xfr_process_list(knot_pkt_t *pkt, xfr_put_cb put, knotd_qdata_t *qdata)
 	struct xfr_proc *xfer = qdata->extra->ext;
 
 	zone_contents_t *zone = qdata->extra->zone->contents;
-	knot_rrset_t soa_rr = node_rrset(zone->apex, KNOT_RRTYPE_SOA);
+	knot_rrset_t *soa_rr = node_rrset(zone->apex, KNOT_RRTYPE_SOA);
 
 	/* Prepend SOA on first packet. */
 	if (xfer->stats.messages == 0) {
-		ret = knot_pkt_put(pkt, 0, &soa_rr, KNOT_PF_NOTRUNC);
+		ret = knot_pkt_put(pkt, 0, soa_rr, KNOT_PF_NOTRUNC);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
@@ -53,7 +53,7 @@ int xfr_process_list(knot_pkt_t *pkt, xfr_put_cb put, knotd_qdata_t *qdata)
 
 	/* Append SOA on last packet. */
 	if (ret == KNOT_EOK) {
-		ret = knot_pkt_put(pkt, 0, &soa_rr, KNOT_PF_NOTRUNC);
+		ret = knot_pkt_put(pkt, 0, soa_rr, KNOT_PF_NOTRUNC);
 	}
 
 	/* Update counters. */
