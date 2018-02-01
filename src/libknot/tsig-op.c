@@ -394,7 +394,7 @@ int knot_tsig_sign(uint8_t *msg, size_t *msg_len, size_t msg_max_len,
 
 	/* Write RRSet to wire */
 	ret = knot_rrset_to_wire(tmp_tsig, msg + *msg_len,
-	                         msg_max_len - *msg_len, NULL);
+	                         msg_max_len - *msg_len, 0, NULL);
 	if (ret < 0) {
 		*digest_len = 0;
 		knot_rrset_free(&tmp_tsig, NULL);
@@ -485,7 +485,7 @@ int knot_tsig_sign_next(uint8_t *msg, size_t *msg_len, size_t msg_max_len,
 	knot_tsig_rdata_set_other_data(tmp_tsig, 0, NULL);
 
 	ret = knot_rrset_to_wire(tmp_tsig, msg + *msg_len,
-	                         msg_max_len - *msg_len, NULL);
+	                         msg_max_len - *msg_len, 0, NULL);
 	if (ret < 0) {
 		knot_rrset_free(&tmp_tsig, NULL);
 		*digest_len = 0;
@@ -672,7 +672,7 @@ int knot_tsig_append(uint8_t *msg, size_t *msg_len, size_t msg_max_len,
 {
 	/* Write RRSet to wire */
 	int ret = knot_rrset_to_wire(tsig_rr, msg + *msg_len,
-	                             msg_max_len - *msg_len, NULL);
+	                             msg_max_len - *msg_len, 0, NULL);
 	if (ret < 0) {
 		return ret;
 	}

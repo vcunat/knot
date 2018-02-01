@@ -39,12 +39,13 @@ struct knot_compr;
  * \param rrset     RRSet to be converted.
  * \param wire      Output wire buffer.
  * \param max_size  Capacity of wire buffer.
+ * \param rotate    Rotate the RR order by this count.
  * \param compr     Compression context.
  *
  * \return Output size, negative number on error (KNOT_E*).
  */
 int knot_rrset_to_wire(const knot_rrset_t *rrset, uint8_t *wire, uint16_t max_size,
-                       struct knot_compr *compr);
+                       uint16_t rotate, struct knot_compr *compr);
 
 /*!
 * \brief Creates one RR from wire, stores it into \a rrset.

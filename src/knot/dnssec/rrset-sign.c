@@ -163,7 +163,7 @@ static int sign_ctx_add_records(dnssec_sign_ctx_t *ctx, const knot_rrset_t *cove
 		return KNOT_ENOMEM;
 	}
 
-	int written = knot_rrset_to_wire(covered, rrwf, KNOT_WIRE_MAX_PKTSIZE, NULL);
+	int written = knot_rrset_to_wire(covered, rrwf, KNOT_WIRE_MAX_PKTSIZE, 0, NULL);
 	if (written < 0) {
 		free(rrwf);
 		return written;
