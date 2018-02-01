@@ -646,14 +646,44 @@ static int write_rr(const knot_rrset_t *rrset, uint16_t rrset_index,
 	return write_rdata(rrset, rrset_index, dst, dst_avail, compr);
 }
 
-/*!
- * \brief Write RR Set content to a wire.
- */
+_public_
+int knot_rrset_to_wire_rotate(const knot_rrset_t *rrset, uint8_t *wire,
+                              uint16_t max_size, uint16_t rotate,
+                              knot_compr_t *compr)
+{
+	if (rrset == NULL || wire == NULL) {
+		return KNOT_EINVAL;
+	}
+	if (rrset->rrs.rr_count == 0) {
+		return 0;
+	}
+
+	uint8_t *write = wire;
+	size_t capacity = max_size;
+
+	rotate %= rrset->rrs.rr_count;
+
+	for (uint16_t i = rotate; i < rrset->rrs.rr_count; i++) {
+		int ret = write_rr(rrset, i, &write, &capacity, compr);
+		if (ret != KNOT_EOK) {
+			return ret;
+		}
+	}
+	for (uint16_t i = 0; i < rotate; i++) {
+		int ret = write_rr(rrset, i, &write, &capacity, compr);
+		if (ret != KNOT_EOK) {
+			return ret;
+		}
+	}
+
+	return write - wire;
+}
+
 _public_
 int knot_rrset_to_wire(const knot_rrset_t *rrset, uint8_t *wire, uint16_t max_size,
                        knot_compr_t *compr)
 {
-	if (!rrset || !wire) {
+	if (rrset == NULL || wire == NULL) {
 		return KNOT_EINVAL;
 	}
 
