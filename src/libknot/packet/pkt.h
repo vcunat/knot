@@ -48,6 +48,8 @@ enum {
 	KNOT_PF_CHECKDUP  = 1 << 3, /*!< Check for duplicates. */
 	KNOT_PF_KEEPWIRE  = 1 << 4, /*!< Keep wireformat untouched when parsing. */
 	KNOT_PF_NOCANON   = 1 << 5, /*!< Don't canonicalize rrsets during parsing. */
+	/*! Rotate the RRset.  Not a flag - spans all the six bits till the end. */
+	KNOT_PF_ROTATE    = 1 << 10,
 };
 
 /*!
@@ -208,7 +210,8 @@ int knot_pkt_put_question(knot_pkt_t *pkt, const knot_dname_t *qname,
  * \brief Put RRSet into packet.
  *
  * \note See compr.h for description on how compression hints work.
- * \note Available flags: PF_FREE, KNOT_PF_CHECKDUP, KNOT_PF_NOTRUNC
+ * \note Available flags: PF_FREE, KNOT_PF_CHECKDUP, KNOT_PF_NOTRUNC,
+ *       and the KNOT_PF_ROTATE pseudo-flag (use: (flags | number * KNOT_PF_ROTATE)
  *
  * \param pkt
  * \param compr_hint Compression hint, see enum knot_compr_hint or absolute

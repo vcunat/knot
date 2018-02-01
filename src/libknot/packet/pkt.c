@@ -568,7 +568,7 @@ int knot_pkt_put(knot_pkt_t *pkt, uint16_t compr_hint, const knot_rrset_t *rr,
 	size_t maxlen = pkt_remaining(pkt);
 
 	/* Write RRSet to wireformat. */
-	ret = knot_rrset_to_wire(rr, pos, maxlen, 0, &pkt->compr);
+	ret = knot_rrset_to_wire(rr, pos, maxlen, flags / KNOT_PF_ROTATE, &pkt->compr);
 	if (ret < 0) {
 		/* Truncate packet if required. */
 		if (ret == KNOT_ESPACE && !(flags & KNOT_PF_NOTRUNC)) {
