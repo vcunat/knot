@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2018 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -14,7 +14,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <assert.h>
 #include <tap/basic.h>
 
 #include "libknot/packet/rrset-wire.h"
@@ -34,8 +33,8 @@
 
 // Initializers' sizes
 
-#define QUERY_SIZE 12 + 4
-#define RR_HEADER_SIZE 10
+#define QUERY_SIZE 12 + 4 // MESSAGE HEADER + QTYPE + QCLASS
+#define RR_HEADER_SIZE 10 // TYPE + CLASS + TTL + RDLEN
 
 // Sample domain names
 
@@ -63,7 +62,6 @@
 'p', 'q', 'r', 's', 't', 'u', 'v', 'x', 'x', 'y', 'z', 'a', 'b', \
 'c', 'd', 'e', 'f', 'g', 'h', 'i', 0x00
 #define QNAME_LONG_SIZE 255
-#define POINTER_SIZE 2
 
 struct wire_data {
 	uint8_t wire[65535];
@@ -79,12 +77,12 @@ static const struct wire_data FROM_CASES[FROM_CASE_COUNT] = {
 { .wire = { MESSAGE_HEADER(1, 0, 0), QUERY(QNAME, KNOT_RRTYPE_A)},
   .size = QUERY_SIZE + QNAME_SIZE,
   .pos = QUERY_SIZE + QNAME_SIZE,
-  .code = KNOT_EMALF,
+  .code = KNOT_EINVAL,
   .msg = "No header" },
 { .wire = { MESSAGE_HEADER(1, 0, 0), QUERY(QNAME, KNOT_RRTYPE_A), 0x00, 0x00, 0x01},
   .size = QUERY_SIZE + QNAME_SIZE + 3,
   .pos = QUERY_SIZE + QNAME_SIZE,
-  .code = KNOT_EMALF,
+  .code = KNOT_EFEWDATA,
   .msg = "Partial header" },
 { .wire = { MESSAGE_HEADER(1, 0, 0), QUERY(QNAME, KNOT_RRTYPE_A),
             RR_HEADER(QNAME, KNOT_RRTYPE_A, 0x00, 0x04) },
@@ -132,7 +130,7 @@ static const struct wire_data FROM_CASES[FROM_CASE_COUNT] = {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, QNAME_POINTER },
   .size = 65535 + QNAME_LONG_SIZE + QUERY_SIZE + RR_HEADER_SIZE + 2,
   .pos = QUERY_SIZE + QNAME_LONG_SIZE,
-  .code = KNOT_EMALF,
+  .code = KNOT_ESPACE,
   .msg = "Max RDLENGTH + compression"},
 { .wire = { MESSAGE_HEADER(1, 0, 0), QUERY(QNAME, KNOT_RRTYPE_NSEC),
             RR_HEADER(QNAME_POINTER, KNOT_RRTYPE_NSEC, 0x00, 0x03),
@@ -190,16 +188,18 @@ static const struct wire_data FROM_CASES[FROM_CASE_COUNT] = {
   .msg = "Obsolete RR type"},
 };
 
-#define TEST_CASE_FROM(rrset, i) size_t _pos##i = FROM_CASES[i].pos; \
-	ok(knot_rrset_rr_from_wire(FROM_CASES[i].wire, &_pos##i, FROM_CASES[i].size, \
-	NULL, rrset, true) == FROM_CASES[i].code, "rrset wire: %s", FROM_CASES[i].msg)
-
 static void test_inputs(void)
 {
 	for (size_t i = 0; i < FROM_CASE_COUNT; ++i) {
 		knot_rrset_t rrset;
 		knot_rrset_init_empty(&rrset);
-		TEST_CASE_FROM(&rrset, i);
+
+		size_t pos = FROM_CASES[i].pos;
+
+		ok(knot_rrset_rr_from_wire(FROM_CASES[i].wire, &pos,
+		   FROM_CASES[i].size, &rrset, NULL, true) == FROM_CASES[i].code,
+		   "rrset wire: %s", FROM_CASES[i].msg);
+
 		knot_rrset_clear(&rrset, NULL);
 	}
 }
@@ -210,7 +210,7 @@ static void check_canon(uint8_t *wire, size_t size, size_t pos, bool canon,
 	knot_rrset_t rrset;
 	knot_rrset_init_empty(&rrset);
 
-	int ret = knot_rrset_rr_from_wire(wire, &pos, size, NULL, &rrset, canon);
+	int ret = knot_rrset_rr_from_wire(wire, &pos, size, &rrset, NULL, canon);
 	is_int(KNOT_EOK, ret, "OK %s canonization", canon ? "with" : "without");
 	ok(memcmp(rrset.owner, qname, knot_dname_size(qname)) == 0, "compare owner");
 
