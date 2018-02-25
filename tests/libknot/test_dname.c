@@ -511,25 +511,6 @@ int main(int argc, char *argv[])
 	knot_dname_free(d, NULL);
 	knot_dname_free(d2, NULL);
 
-	/* DNAME PARSE CHECKS */
-
-	/* parse from wire (valid) */
-	t = "\x04""abcd""\x03""efg";
-	len = 10;
-	pos = 0;
-	d = knot_dname_parse((const uint8_t *)t, &pos, len, NULL);
-	ok(d != NULL, "dname_parse: valid name");
-	ok(pos == len, "dname_parse: valid name (parsed length)");
-	knot_dname_free(d, NULL);
-
-	/* parse from wire (invalid) */
-	t = "\x08""dddd";
-	len = 5;
-	pos = 0;
-	d = knot_dname_parse((const uint8_t *)t, &pos, len, NULL);
-	ok(d == NULL, "dname_parse: bad name");
-	ok(pos == 0, "dname_parse: bad name (parsed length)");
-
 	/* DNAME EQUALITY CHECKS */
 
 	t = "ab.cd.ef";
