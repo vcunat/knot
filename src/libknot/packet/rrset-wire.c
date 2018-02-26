@@ -177,15 +177,174 @@ static int write_rdata_naptr_header(const uint8_t **src, size_t *src_avail,
  * \brief DNAME RDATA processing config.
  */
 struct dname_config {
-	int (*write_cb)(const uint8_t **src, size_t *src_avail,
-	                uint8_t **dst, size_t *dst_avail,
-	                int dname_type, struct dname_config *dname_cfg);
+	bool to_wire;
 	knot_compr_t *compr;
 	uint16_t hint;
 	const uint8_t *pkt_wire;
 };
 
 typedef struct dname_config dname_config_t;
+
+/*! \brief Helper for \ref compr_put_dname, writes label(s) with size checks. */
+#define WRITE_LABEL(dst, written, label, max, len) \
+	if ((written) + (len) > (max)) { \
+		return KNOT_ESPACE; \
+	} else { \
+		memcpy((dst) + (written), (label), (len)); \
+		written += (len); \
+	}
+
+/*!
+ * \brief Write compressed domain name to the destination wire.
+ *
+ * \param dname Name to be written.
+ * \param dst Destination wire.
+ * \param max Maximum number of bytes available.
+ * \param compr Compression context (NULL for no compression)
+ * \return Number of written bytes or an error.
+ */
+static int compr_put_dname(const knot_dname_t *dname, uint8_t *dst, uint16_t max,
+                           knot_compr_t *compr)
+{
+	assert(dname && dst);
+
+	/* Write uncompressible names directly (zero label dname). */
+	if (compr == NULL || *dname == '\0') {
+		return knot_dname_to_wire(dst, dname, max);
+	}
+
+	/* Get number of labels (should not be a zero label dname). */
+	size_t name_labels = knot_dname_labels(dname, NULL);
+	assert(name_labels > 0);
+
+	/* Suffix must not be longer than whole name. */
+	const knot_dname_t *suffix = compr->wire + compr->suffix.pos;
+	int suffix_labels = compr->suffix.labels;
+	while (suffix_labels > name_labels) {
+		suffix = knot_wire_next_label(suffix, compr->wire);
+		--suffix_labels;
+	}
+
+	/* Suffix is shorter than name, write labels until aligned. */
+	uint8_t orig_labels = name_labels;
+	uint16_t written = 0;
+	while (name_labels > suffix_labels) {
+		WRITE_LABEL(dst, written, dname, max, (*dname + 1));
+		dname = knot_wire_next_label(dname, NULL);
+		--name_labels;
+	}
+
+	/* Label count is now equal. */
+	assert(name_labels == suffix_labels);
+	const knot_dname_t *match_begin = dname;
+	const knot_dname_t *compr_ptr = suffix;
+	while (dname[0] != '\0') {
+
+		/* Next labels. */
+		const knot_dname_t *next_dname = knot_wire_next_label(dname, NULL);
+		const knot_dname_t *next_suffix = knot_wire_next_label(suffix, compr->wire);
+
+		/* Two labels match, extend suffix length. */
+		if (!label_is_equal(dname, suffix)) {
+			/* If they don't match, write unmatched labels. */
+			uint16_t mismatch_len = (dname - match_begin) + (*dname + 1);
+			WRITE_LABEL(dst, written, match_begin, max, mismatch_len);
+			/* Start new potential match. */
+			match_begin = next_dname;
+			compr_ptr = next_suffix;
+		}
+
+		/* Jump to next labels. */
+		dname = next_dname;
+		suffix = next_suffix;
+	}
+
+	/* If match begins at the end of the name, write '\0' label. */
+	if (match_begin == dname) {
+		WRITE_LABEL(dst, written, dname, max, 1);
+	} else {
+		/* Match covers >0 labels, write out compression pointer. */
+		if (written + sizeof(uint16_t) > max) {
+			return KNOT_ESPACE;
+		}
+		knot_wire_put_pointer(dst + written, compr_ptr - compr->wire);
+		written += sizeof(uint16_t);
+	}
+
+	assert(dst >= compr->wire);
+	size_t wire_pos = dst - compr->wire;
+	assert(wire_pos < KNOT_WIRE_MAX_PKTSIZE);
+
+	/* Heuristics - expect similar names are grouped together. */
+	if (written > sizeof(uint16_t) && wire_pos + written < KNOT_WIRE_PTR_MAX) {
+		compr->suffix.pos = wire_pos;
+		compr->suffix.labels = orig_labels;
+	}
+
+	return written;
+}
+/*!
+ * \brief Write RDATA DNAME to wire.
+ */
+static int rdata_dname(const uint8_t **src, size_t *src_avail,
+                       uint8_t **dst, size_t *dst_avail,
+                       int dname_type, dname_config_t *dname_cfg)
+{
+	if (dname_cfg->to_wire) {
+		/* Source domain name */
+
+		const knot_dname_t *dname = *src;
+		size_t dname_size = knot_dname_size(dname);
+
+		/* Output domain name */
+
+		knot_compr_t *put_compr = NULL;
+		if (dname_type == KNOT_RDATA_WF_COMPRESSIBLE_DNAME) {
+			put_compr = dname_cfg->compr;
+		}
+
+		int written = compr_put_dname(dname, *dst, dname_max(*dst_avail), put_compr);
+		if (written < 0) {
+			return written;
+		}
+
+		/* Update compression hints */
+
+		if (compr_get_ptr(dname_cfg->compr, dname_cfg->hint) == 0) {
+			compr_set_ptr(dname_cfg->compr, dname_cfg->hint, *dst, written);
+		}
+
+		/* Update buffers */
+
+		*dst += written;
+		*dst_avail -= written;
+
+		*src += dname_size;
+		*src_avail -= dname_size;
+	} else {
+
+		int compr_size = knot_dname_wire_check(*src, *src + *src_avail,
+						       dname_cfg->pkt_wire);
+		if (compr_size <= 0) {
+			return compr_size;
+		}
+
+		int decompr_size = knot_dname_unpack(*dst, *src, *dst_avail,
+						     dname_cfg->pkt_wire);
+		if (decompr_size <= 0) {
+			return decompr_size;
+		}
+
+		/* Update buffers */
+		*dst += decompr_size;
+		*dst_avail -= decompr_size;
+
+		*src += compr_size;
+		*src_avail -= compr_size;
+	}
+
+	return KNOT_EOK;
+}
 
 /*!
  * \brief Write one RDATA block to wire.
@@ -198,8 +357,8 @@ static int write_rdata_block(const uint8_t **src, size_t *src_avail,
 	case KNOT_RDATA_WF_COMPRESSIBLE_DNAME:
 	case KNOT_RDATA_WF_DECOMPRESSIBLE_DNAME:
 	case KNOT_RDATA_WF_FIXED_DNAME:
-		return dname_cfg->write_cb(src, src_avail, dst, dst_avail,
-		                           type, dname_cfg);
+		return rdata_dname(src, src_avail, dst, dst_avail,
+		                   type, dname_cfg);
 	case KNOT_RDATA_WF_NAPTR_HEADER:
 		return write_rdata_naptr_header(src, src_avail, dst, dst_avail);
 	case KNOT_RDATA_WF_REMAINDER:
@@ -313,104 +472,6 @@ static int rdata_len(const uint8_t **src, size_t *src_avail,
 
 /*- RRSet to wire -----------------------------------------------------------*/
 
-/*! \brief Helper for \ref compr_put_dname, writes label(s) with size checks. */
-#define WRITE_LABEL(dst, written, label, max, len) \
-	if ((written) + (len) > (max)) { \
-		return KNOT_ESPACE; \
-	} else { \
-		memcpy((dst) + (written), (label), (len)); \
-		written += (len); \
-	}
-
-/*!
- * \brief Write compressed domain name to the destination wire.
- *
- * \param dname Name to be written.
- * \param dst Destination wire.
- * \param max Maximum number of bytes available.
- * \param compr Compression context (NULL for no compression)
- * \return Number of written bytes or an error.
- */
-static int compr_put_dname(const knot_dname_t *dname, uint8_t *dst, uint16_t max,
-                           knot_compr_t *compr)
-{
-	assert(dname && dst);
-
-	/* Write uncompressible names directly (zero label dname). */
-	if (compr == NULL || *dname == '\0') {
-		return knot_dname_to_wire(dst, dname, max);
-	}
-
-	/* Get number of labels (should not be a zero label dname). */
-	size_t name_labels = knot_dname_labels(dname, NULL);
-	assert(name_labels > 0);
-
-	/* Suffix must not be longer than whole name. */
-	const knot_dname_t *suffix = compr->wire + compr->suffix.pos;
-	int suffix_labels = compr->suffix.labels;
-	while (suffix_labels > name_labels) {
-		suffix = knot_wire_next_label(suffix, compr->wire);
-		--suffix_labels;
-	}
-
-	/* Suffix is shorter than name, write labels until aligned. */
-	uint8_t orig_labels = name_labels;
-	uint16_t written = 0;
-	while (name_labels > suffix_labels) {
-		WRITE_LABEL(dst, written, dname, max, (*dname + 1));
-		dname = knot_wire_next_label(dname, NULL);
-		--name_labels;
-	}
-
-	/* Label count is now equal. */
-	assert(name_labels == suffix_labels);
-	const knot_dname_t *match_begin = dname;
-	const knot_dname_t *compr_ptr = suffix;
-	while (dname[0] != '\0') {
-
-		/* Next labels. */
-		const knot_dname_t *next_dname = knot_wire_next_label(dname, NULL);
-		const knot_dname_t *next_suffix = knot_wire_next_label(suffix, compr->wire);
-
-		/* Two labels match, extend suffix length. */
-		if (!label_is_equal(dname, suffix)) {
-			/* If they don't match, write unmatched labels. */
-			uint16_t mismatch_len = (dname - match_begin) + (*dname + 1);
-			WRITE_LABEL(dst, written, match_begin, max, mismatch_len);
-			/* Start new potential match. */
-			match_begin = next_dname;
-			compr_ptr = next_suffix;
-		}
-
-		/* Jump to next labels. */
-		dname = next_dname;
-		suffix = next_suffix;
-	}
-
-	/* If match begins at the end of the name, write '\0' label. */
-	if (match_begin == dname) {
-		WRITE_LABEL(dst, written, dname, max, 1);
-	} else {
-		/* Match covers >0 labels, write out compression pointer. */
-		if (written + sizeof(uint16_t) > max) {
-			return KNOT_ESPACE;
-		}
-		knot_wire_put_pointer(dst + written, compr_ptr - compr->wire);
-		written += sizeof(uint16_t);
-	}
-
-	assert(dst >= compr->wire);
-	size_t wire_pos = dst - compr->wire;
-	assert(wire_pos < KNOT_WIRE_MAX_PKTSIZE);
-
-	/* Heuristics - expect similar names are grouped together. */
-	if (written > sizeof(uint16_t) && wire_pos + written < KNOT_WIRE_PTR_MAX) {
-		compr->suffix.pos = wire_pos;
-		compr->suffix.labels = orig_labels;
-	}
-
-	return written;
-}
 
 /*!
  * \brief Write RR owner to wire.
@@ -521,53 +582,6 @@ static int write_fixed_header(const knot_rrset_t *rrset, uint16_t rrset_index,
 }
 
 /*!
- * \brief Write RDATA DNAME to wire.
- */
-static int compress_rdata_dname(const uint8_t **src, size_t *src_avail,
-                                uint8_t **dst, size_t *dst_avail,
-                                int dname_type, dname_config_t *dname_cfg)
-{
-	assert(src && *src);
-	assert(src_avail);
-	assert(dst && *dst);
-	assert(dst_avail);
-	assert(dname_cfg);
-
-	/* Source domain name */
-
-	const knot_dname_t *dname = *src;
-	size_t dname_size = knot_dname_size(dname);
-
-	/* Output domain name */
-
-	knot_compr_t *put_compr = NULL;
-	if (dname_type == KNOT_RDATA_WF_COMPRESSIBLE_DNAME) {
-		put_compr = dname_cfg->compr;
-	}
-
-	int written = compr_put_dname(dname, *dst, dname_max(*dst_avail), put_compr);
-	if (written < 0) {
-		return written;
-	}
-
-	/* Update compression hints */
-
-	if (compr_get_ptr(dname_cfg->compr, dname_cfg->hint) == 0) {
-		compr_set_ptr(dname_cfg->compr, dname_cfg->hint, *dst, written);
-	}
-
-	/* Update buffers */
-
-	*dst += written;
-	*dst_avail -= written;
-
-	*src += dname_size;
-	*src_avail -= dname_size;
-
-	return KNOT_EOK;
-}
-
-/*!
  * \brief Write RDLENGTH and RDATA fields of a RR in a wire.
  */
 static int write_rdata(const knot_rrset_t *rrset, uint16_t rrset_index,
@@ -594,7 +608,7 @@ static int write_rdata(const knot_rrset_t *rrset, uint16_t rrset_index,
 
 	uint8_t *wire_rdata_begin = *dst;
 	dname_config_t dname_cfg = {
-		.write_cb = compress_rdata_dname,
+		.to_wire = true,
 		.compr = compr,
 		.hint = KNOT_COMPR_HINT_RDATA + rrset_index
 	};
@@ -718,42 +732,6 @@ static int parse_header(const uint8_t *pkt_wire, size_t *pos, size_t pkt_size,
 	return KNOT_EOK;
 }
 
-/*!
- * \brief Parse and decompress RDATA.
- */
-static int decompress_rdata_dname(const uint8_t **src, size_t *src_avail,
-                                  uint8_t **dst, size_t *dst_avail,
-                                  int dname_type, dname_config_t *dname_cfg)
-{
-	assert(src && *src);
-	assert(src_avail);
-	assert(dst && *dst);
-	assert(dst_avail);
-	assert(dname_cfg);
-	UNUSED(dname_type);
-
-	int compr_size = knot_dname_wire_check(*src, *src + *src_avail,
-	                                       dname_cfg->pkt_wire);
-	if (compr_size <= 0) {
-		return compr_size;
-	}
-
-	int decompr_size = knot_dname_unpack(*dst, *src, *dst_avail,
-	                                     dname_cfg->pkt_wire);
-	if (decompr_size <= 0) {
-		return decompr_size;
-	}
-
-	/* Update buffers */
-	*dst += decompr_size;
-	*dst_avail -= decompr_size;
-
-	*src += compr_size;
-	*src_avail -= compr_size;
-
-	return KNOT_EOK;
-}
-
 static bool allow_zero_rdata(const knot_rrset_t *rr,
                              const knot_rdata_descriptor_t *desc)
 {
@@ -818,7 +796,7 @@ static int parse_rdata(const uint8_t *pkt_wire, size_t *pos, size_t pkt_size,
 	/* Parse RDATA */
 
 	dname_config_t dname_cfg = {
-		.write_cb = decompress_rdata_dname,
+		.to_wire = false,
 		.pkt_wire = pkt_wire
 	};
 
