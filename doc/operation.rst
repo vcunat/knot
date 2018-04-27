@@ -273,6 +273,33 @@ modified zone file and if successful, thaw the zone.::
     $ knotc zone-reload example.com.
     $ knotc zone-thaw example.com.
 
+.. _Zone loading:
+
+Zone loading
+============
+
+This paragraph describes how Knot loads zone. It's a rather complicated topic,
+as many different circumstances and settings influence the process. It depends on
+the value of :ref:`zonefile-load <zone_zonefile-load>` and :ref:`journal-content <zone_journal-content>`
+parameters (also DNSSEC signing applies), the existence of zonefile and journal 
+(and their relative out-of-dateness) and wheather
+it is a cold start of Knot daemon, or a zone reload (invoked by e.g. knotc interface).
+Please note that transfers are not taken into account here - they are planned after the zone is loaded
+(including AXFR bootstrap).
+
+If the zonefile exists (and is not excluded by configuration), it is first loaded and according to its
+SOA serial number, eventual journal changesets are applied. If this is a zone reload and we have
+`zonefile-load: difference`, the difference between old and new contents is computed and stored into journal
+like an update. The zonefile should be normally either unchaged since last load, or changed with incremented
+SOA serial. In such case, if the serial gets decreased, the load is interrupted with an error; if unchanged,
+it is increased by Knot.
+
+Anyway, unless an error, the resulting contents is, after DNSSEC signing, used as the new zone.
+
+The option `journal-content: all` lets Knot to keep track of zone contents also across daemon restarts,
+it makes the cold start effectively work like a zone reload, with the old contents loaded from journal
+(unless this is the very first start with zone not yet saved into journal).
+
 .. _Journal behaviour:
 
 Journal behaviour
