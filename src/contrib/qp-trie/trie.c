@@ -127,7 +127,7 @@ static inline void empty_root(node_t *root) {
 static void assert_portability(void) {
 #if FLAGS_HACK
 	assert(((union node){ .leaf = {
-			.key = ((void *)NULL) + 1,
+			.key = ((uint8_t *)NULL) + 1,
 			.val = NULL
 		} }).branch.flags == 1);
 #endif
@@ -214,7 +214,9 @@ static node_t* twig(node_t *t, uint i)
 /*! \brief Simple string comparator. */
 static int key_cmp(const char *k1, uint32_t k1_len, const char *k2, uint32_t k2_len)
 {
-	int ret = memcmp(k1, k2, MIN(k1_len, k2_len));
+	const uint32_t len = MIN(k1_len, k2_len);
+	/* Strictly speaking, C99 doesn't allow NULL in memcmp() with zero length. */
+	int ret = likely(len) ? memcmp(k1, k2, len) : 0;
 	if (ret != 0) {
 		return ret;
 	}
@@ -664,7 +666,7 @@ success:
 /*! \brief Initialize a new leaf, copying the key, and returning failure code. */
 static int mk_leaf(node_t *leaf, const char *key, uint32_t len, knot_mm_t *mm)
 {
-	tkey_t *k = mm_alloc(mm, sizeof(tkey_t) + len);
+	tkey_t *k = mm_alloc(mm, offsetof(tkey_t, chars) + len);
 	#if FLAGS_HACK
 		assert(((uintptr_t)k) % 4 == 0); // we need an aligned pointer
 	#endif
