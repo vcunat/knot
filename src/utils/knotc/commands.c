@@ -575,11 +575,8 @@ static int zone_memstats(const knot_dname_t *dname, void *data)
 {
 	// Init malloc wrapper for trie size estimation.
 	size_t malloc_size = 0;
-	knot_mm_t mem_ctx = {
-		.ctx = &malloc_size,
-		.alloc = estimator_malloc,
-		.free = estimator_free
-	};
+	knot_mm_t mem_ctx;
+	estimator_mm_init(&mem_ctx, &malloc_size);
 
 	// Init memory estimation context.
 	zone_estim_t est = {

@@ -31,22 +31,12 @@ typedef struct {
 } zone_estim_t;
 
 /*!
- * \brief Size counting malloc wrapper.
+ * \brief Init a size-counting malloc wrapper.
  *
- * \param ctx Data for malloc wrapper.
- * \param len Size to allocate.
- *
- * \retval Alloc'd data on succes.
- * \retval NULL on error.
+ * \param mm Context to initialize.
+ * \param counter Counter that will be updated; you probably want to zero it.
  */
-void *estimator_malloc(void *ctx, size_t len);
-
-/*!
- * \brief Size counting free wrapper.
- *
- * \param p Data to free.
- */
-void estimator_free(void *p);
+void estimator_mm_init(knot_mm_t *mm, size_t *counter);
 
 /*!
  * \brief For use with scanner - counts memsize of RRSets.

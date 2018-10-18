@@ -1,4 +1,4 @@
-/*  Copyright (C) 2011 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2011-2018 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,14 +27,16 @@
 #include <stddef.h>
 
 /* Memory allocation function prototypes. */
-typedef void* (*knot_mm_alloc_t)(void *ctx, size_t len);
+/*! \brief realloc() semantics, except that prev_size must be passed if ptr != NULL. */
+typedef void* (*knot_mm_realloc_t)(void *ctx, void *ptr, size_t size, size_t prev_size);
+/*! \brief free() semantics. */
 typedef void (*knot_mm_free_t)(void *p);
 
 /*! \brief Memory allocation context. */
 typedef struct knot_mm {
 	void *ctx; /* \note Must be first */
-	knot_mm_alloc_t alloc;
-	knot_mm_free_t free;
+	knot_mm_realloc_t krealloc;
+	knot_mm_free_t kfree;
 } knot_mm_t;
 
 /*! @} */

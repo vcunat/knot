@@ -1,4 +1,4 @@
-/*  Copyright (C) 2017 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2017-2018 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -14,6 +14,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <assert.h>
 #include <stdlib.h>
 
 #include "contrib/mempattern.h"
@@ -25,16 +26,10 @@ static void mm_nofree(void *p)
 	/* nop */
 }
 
-static void *mm_malloc(void *ctx, size_t n)
-{
-	(void)ctx;
-	return malloc(n);
-}
-
 void *mm_alloc(knot_mm_t *mm, size_t size)
 {
 	if (mm) {
-		return mm->alloc(mm->ctx, size);
+		return mm->krealloc(mm->ctx, NULL, size, -1);
 	} else {
 		return malloc(size);
 	}
@@ -63,20 +58,28 @@ void *mm_calloc(knot_mm_t *mm, size_t nmemb, size_t size)
 void *mm_realloc(knot_mm_t *mm, void *what, size_t size, size_t prev_size)
 {
 	if (mm) {
-		void *p = mm->alloc(mm->ctx, size);
-		if (p == NULL) {
-			return NULL;
-		} else {
-			if (what) {
-				memcpy(p, what,
-				       prev_size < size ? prev_size : size);
-			}
-			mm_free(mm, what);
-			return p;
-		}
+		return mm->krealloc(mm->ctx, what, size, prev_size);
 	} else {
 		return realloc(what, size);
 	}
+}
+
+static void *mm_mp_realloc(void *ctx, void *what, size_t size, size_t prev_size)
+{
+	if (what && size <= prev_size) {
+		/* No use to decrease size with mempools. */
+		return what;
+	}
+	void *p = mp_alloc(ctx, size);
+	if (p == NULL) {
+		return NULL;
+	}
+	if (what) {
+		assert(prev_size <= size);
+		memcpy(p, what, prev_size);
+	}
+	/* freeing is no-op */
+	return p;
 }
 
 char *mm_strdup(knot_mm_t *mm, const char *s)
@@ -99,8 +102,8 @@ char *mm_strdup(knot_mm_t *mm, const char *s)
 void mm_free(knot_mm_t *mm, void *what)
 {
 	if (mm) {
-		if (mm->free) {
-			mm->free(what);
+		if (mm->kfree) {
+			mm->kfree(what);
 		}
 	} else {
 		free(what);
@@ -109,14 +112,12 @@ void mm_free(knot_mm_t *mm, void *what)
 
 void mm_ctx_init(knot_mm_t *mm)
 {
-	mm->ctx = NULL;
-	mm->alloc = mm_malloc;
-	mm->free = free;
+	memset(mm, 0, sizeof(*mm));
 }
 
 void mm_ctx_mempool(knot_mm_t *mm, size_t chunk_size)
 {
 	mm->ctx = mp_new(chunk_size);
-	mm->alloc = (knot_mm_alloc_t)mp_alloc;
-	mm->free = mm_nofree;
+	mm->krealloc = mm_mp_realloc;
+	mm->kfree = mm_nofree;
 }
