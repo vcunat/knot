@@ -119,16 +119,20 @@ static void rrset_memsize(zone_estim_t *est, const zs_scanner_t *scanner)
 	}
 }
 
-void *estimator_malloc(void *ctx, size_t len)
+static void *estimator_realloc(void *ctx, void *what, size_t size, size_t prev_size)
 {
 	size_t *count = (size_t *)ctx;
-	*count += add_overhead(len);
-	return malloc(len);
+	if (!what || size > prev_size) { /* don't add or subtract size decreases */
+		*count += add_overhead(size);
+	}
+	return realloc(what, size);
 }
 
-void estimator_free(void *p)
+void estimator_mm_init(knot_mm_t *mm, size_t *counter)
 {
-	free(p);
+	mm->ctx = counter;
+	mm->krealloc = estimator_realloc;
+	mm->kfree = NULL;
 }
 
 void estimator_rrset_memsize_wrap(zs_scanner_t *scanner)

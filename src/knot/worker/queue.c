@@ -55,7 +55,7 @@ task_t *worker_queue_dequeue(worker_queue_t *queue)
 		ptrnode_t *node = HEAD(queue->list);
 		task = (void *)node->d;
 		rem_node(&node->n);
-		queue->mm_ctx.free(&node->n);
+		mm_free(&queue->mm_ctx, &node->n);
 	}
 
 	return task;
