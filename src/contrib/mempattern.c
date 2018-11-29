@@ -18,8 +18,14 @@
 #include <stdlib.h>
 
 #include "contrib/mempattern.h"
+#include "contrib/macros.h"
 #include "contrib/string.h"
 #include "contrib/ucw/mempool.h"
+
+/* Semantics of the knot_mm_t structure (internal):
+ * NULL function pointer inside it implies
+ * that the default (de)allocator should be used.
+ */
 
 static void mm_nofree(void *p)
 {
@@ -28,7 +34,7 @@ static void mm_nofree(void *p)
 
 void *mm_alloc(knot_mm_t *mm, size_t size)
 {
-	if (mm) {
+	if (mm && mm->krealloc) {
 		return mm->krealloc(mm->ctx, NULL, size, -1);
 	} else {
 		return malloc(size);
@@ -40,7 +46,7 @@ void *mm_calloc(knot_mm_t *mm, size_t nmemb, size_t size)
 	if (nmemb == 0 || size == 0) {
 		return NULL;
 	}
-	if (mm) {
+	if (mm && mm->krealloc) {
 		size_t total_size = nmemb * size;
 		if (total_size / nmemb != size) { // Overflow check
 			return NULL;
@@ -57,7 +63,7 @@ void *mm_calloc(knot_mm_t *mm, size_t nmemb, size_t size)
 
 void *mm_realloc(knot_mm_t *mm, void *what, size_t size, size_t prev_size)
 {
-	if (mm) {
+	if (mm && mm->krealloc) {
 		return mm->krealloc(mm->ctx, what, size, prev_size);
 	} else {
 		return realloc(what, size);
@@ -66,12 +72,12 @@ void *mm_realloc(knot_mm_t *mm, void *what, size_t size, size_t prev_size)
 
 static void *mm_mp_realloc(void *ctx, void *what, size_t size, size_t prev_size)
 {
-	if (what && size <= prev_size) {
+	if (unlikely(what != NULL) && size <= prev_size) {
 		/* No use to decrease size with mempools. */
 		return what;
 	}
 	void *p = mp_alloc(ctx, size);
-	if (p == NULL) {
+	if (unlikely(p == NULL)) {
 		return NULL;
 	}
 	if (what) {
@@ -87,7 +93,7 @@ char *mm_strdup(knot_mm_t *mm, const char *s)
 	if (s == NULL) {
 		return NULL;
 	}
-	if (mm) {
+	if (mm && mm->krealloc) {
 		size_t len = strlen(s) + 1;
 		void *mem = mm_alloc(mm, len);
 		if (mem == NULL) {
@@ -101,10 +107,8 @@ char *mm_strdup(knot_mm_t *mm, const char *s)
 
 void mm_free(knot_mm_t *mm, const void *what)
 {
-	if (mm) {
-		if (mm->kfree) {
-			mm->kfree((void *)what);
-		}
+	if (mm && mm->kfree) {
+		mm->kfree((void *)what);
 	} else {
 		free((void *)what);
 	}
