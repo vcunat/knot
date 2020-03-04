@@ -364,7 +364,7 @@ static int set_config(const char *confdb, const char *config, size_t max_conf_si
 	return KNOT_EOK;
 }
 
-int main(int argc, char **argv)
+int Xmain(int argc, char **argv)
 {
 	bool daemonize = false;
 	const char *config = NULL;
@@ -588,3 +588,15 @@ int main(int argc, char **argv)
 
 	return EXIT_SUCCESS;
 }
+
+int main(int argc, char **argv)
+{
+	for (const yp_item_t *it = conf_schema; it->name != NULL; ++it) {
+		printf("%s\n", it->name + 1);
+		for (const yp_item_t *sit = it->var.g.sub_items; sit && sit->name; ++sit) {
+			printf("    %s\n", sit->name + 1);
+		}
+	}
+	return 0;
+}
+
